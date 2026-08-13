@@ -65,6 +65,87 @@ fi
 if ! STATUS=$(printf '%s' "$RES" | ${PYTHON:-python3} -c "import json,sys;print(json.load(sys.stdin)['status'])"); then
   echo "CALC RESULT FAIL $1; not finalizing"; exit 5
 fi
+# Suggestion generation/review is an agent stage. Deterministic finalization may
+# validate an existing v5 final, but it must never manufacture an AI verdict.
+RUNTIME_VERSION=$(PYTHONPATH="$SK/scripts${PYTHONPATH:+:$PYTHONPATH}" ${PYTHON:-python3} - "$JOB/state.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("job_runtime_contract_version", 1))
+PY
+)
+finalize_suggestion_candidates() {
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_suggestion_review.py" prepare --job "$JOB"; then
+    echo "SUGGESTION REVIEW PREPARE FAIL $JOB_ARG; not finalizing"; return 9
+  fi
+  if ! REVIEW_COUNT=$(${PYTHON:-python3} - "$JOB/suggestion_review.packet.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    packet = json.load(handle)
+reviewed_ids = packet.get("reviewed_ids")
+if not isinstance(reviewed_ids, list) or any(type(value) is not int for value in reviewed_ids):
+    raise SystemExit("suggestion review packet reviewed_ids is invalid")
+print(len(reviewed_ids))
+PY
+  ); then
+    echo "SUGGESTION REVIEW PACKET INVALID $JOB_ARG; not finalizing"; return 9
+  fi
+  case "$REVIEW_COUNT" in
+    ''|*[!0-9]*) echo "SUGGESTION REVIEW PACKET INVALID $JOB_ARG; not finalizing"; return 9 ;;
+  esac
+  if [ "$REVIEW_COUNT" -gt 0 ] && [ ! -f "$JOB/suggestion_review.json" ]; then
+    echo "SUGGESTION-REVIEW-PENDING $JOB_ARG"; return 10
+  fi
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_suggestion_review.py" publish-final --job "$JOB"; then
+    echo "SUGGESTION FINAL PUBLISH FAIL $JOB_ARG; not finalizing"; return 9
+  fi
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_suggestions.py" validate --job "$JOB"; then
+    echo "SUGGESTION FINAL INVALID $JOB_ARG; not finalizing"; return 9
+  fi
+  return 0
+}
+
+run_suggestion_candidate_finalization() {
+  finalize_suggestion_candidates
+  SUGGESTION_RESULT=$?
+  case "$SUGGESTION_RESULT" in
+    0) return 0 ;;
+    10) exit 10 ;;
+    *) exit "$SUGGESTION_RESULT" ;;
+  esac
+}
+
+if [ "$RUNTIME_VERSION" = "2" ] && [ -f "$JOB/reference_suggestions.json" ]; then
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_suggestions.py" validate --job "$JOB"; then
+    echo "SUGGESTION FINAL INVALID $1; not finalizing"; exit 9
+  fi
+elif [ "$RUNTIME_VERSION" = "2" ] && [ -f "$JOB/reference_suggestions.candidates.json" ]; then
+  run_suggestion_candidate_finalization
+elif [ "$RUNTIME_VERSION" = "2" ] && [ -f "$JOB/reference_suggestions.draft.json" ]; then
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_suggestions.py" publish-candidates \
+       --job "$JOB" --input "$JOB/reference_suggestions.draft.json"; then
+    echo "SUGGESTION CANDIDATE PUBLISH FAIL $1; not finalizing"; exit 9
+  fi
+  run_suggestion_candidate_finalization
+elif [ "$RUNTIME_VERSION" = "2" ] && [ -f "$JOB/reference_suggestions.packet.json" ]; then
+  echo "SUGGESTION-GENERATION-PENDING $1"; exit 10
+elif [ "$RUNTIME_VERSION" = "2" ]; then
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_suggestions.py" prepare --job "$JOB"; then
+    echo "SUGGESTION PREPARE FAIL $1; not finalizing"; exit 9
+  fi
+  if ${PYTHON:-python3} - "$JOB/reference_suggestions.packet.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    packet = json.load(handle)
+raise SystemExit(0 if packet.get("segments") else 1)
+PY
+  then
+    echo "SUGGESTION-GENERATION-PENDING $1"; exit 10
+  fi
+fi
 # 6) PASS 才完成；FAIL single 留待审阅；FAIL iterate 应用已验证修改后等待复检
 if [ "$STATUS" = "PASS" ]; then
   if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" write --state "$JOB/state.json" --errors "$JOB/errors.json" --score "$SCORE"; then

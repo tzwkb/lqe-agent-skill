@@ -16,7 +16,8 @@ from lqe_corrections import CheckFormatError, validate_error_history_term_contra
 from lqe_engine import (
     read_json, load_terms as _load_terms, group_terms as _group_terms,
     RE_CJK as _RE_CJK, _target_lang, _load_lang, _lang_toggle_defaults,
-    current_target, get_review_policy, terminology_enabled, validate_scope_entries,
+    current_target, get_review_policy, require_current_job_runtime,
+    terminology_enabled, validate_scope_entries,
 )
 from lqe_paths import (
     publish_replacement_transaction,
@@ -283,6 +284,7 @@ def _publish_precheck_results(
 def run_pre_check(state_path: Path, out_path: Path | None = None):
     state_path = Path(state_path)
     state = read_json(state_path)
+    require_current_job_runtime(state, "pre-check")
     out = Path(out_path) if out_path is not None else state_path.parent / "errors_precheck.json"
     validate_artifact_paths(
         {"pre-check results": out},
@@ -290,6 +292,11 @@ def run_pre_check(state_path: Path, out_path: Path | None = None):
         context="pre-check",
     )
     segments = state["segments"]
+    blocked_ids = {
+        segment["id"]
+        for segment in segments
+        if segment.get("input_status") == "blocked"
+    }
     review_policy = get_review_policy(state)
     clear_term_history = False
     term_history_problem = None
@@ -337,6 +344,8 @@ def run_pre_check(state_path: Path, out_path: Path | None = None):
     src_first, src_variants = {}, defaultdict(set)
     tgt_first, tgt_sources = {}, defaultdict(set)
     for seg in segments:
+        if seg["id"] in blocked_ids:
+            continue
         t_ = current_target(seg)
         if '…' in t_:
             uni_ids.add(seg["id"])
@@ -359,6 +368,9 @@ def run_pre_check(state_path: Path, out_path: Path | None = None):
     total = 0
 
     for seg in segments:
+        if seg["id"] in blocked_ids:
+            results.append({"id": seg["id"], "issues": []})
+            continue
         src = seg["source"]
         tgt = current_target(seg)
         errs = []

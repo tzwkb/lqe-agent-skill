@@ -8,9 +8,10 @@
 - `confirmed_rules.md`：客户已经确认的规则，优先于风格指南和通用规则。
 - 风格指南与语言说明。
 - 当前模块的 `review_packets/<module>/chunk_NN.json`。packet 只保留该模块所需字段，并绑定原 chunk 的指纹。
+- 当前 batch 的 `review_packets/context/<module>/batch_NN/worker_manifest.json` 及其列出的全部资料、instructions 与 `bundle_set.json`。缺一项、摘要不符或总输入超限时不得开始审校。
 - packet 中的 `review_policy`。`mode=optimized` 执行降本规则，`mode=full` 执行完整规则；不得自行切换。
 
-按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 只处理一个批次：最多 4 个 packet，同时不超过 25,000 原译字符或 100,000 packet 字节；单个超限 packet 独占一个 worker。worker 在批次开始时读取本文件、自己的模块说明和项目上下文；新批次必须新建 worker 并重新读取。发生上下文压缩、异常重复判断或连续格式错误时立即重开，不得依赖上一 worker 的记忆作为证据。
+按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 只处理一个批次：最多 4 个 packet，同时不超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。不可再拆的最小单元仍超限时失败，不截断。worker 在批次开始时读取本文件、自己的模块说明和项目上下文；新批次必须新建 worker并重新读取。发生上下文压缩、异常重复判断或连续格式错误时立即重开，不得依赖上一 worker 的记忆作为证据。
 
 ## 默认紧凑草稿
 
@@ -23,6 +24,10 @@
   "module": "grammar",
   "chunk_id": 0,
   "packet_digest": "<packet.packet_digest>",
+  "worker_batch_id": "<packet.worker_batch_id>",
+  "worker_packet_basis_digest": "<packet.worker_packet_basis_digest>",
+  "context_bundle_set_digest": "<packet.context_bundle_set_digest>",
+  "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
   "reviewed_ids": [0, 1, 2],
   "findings": [
     {
@@ -41,7 +46,7 @@
 }
 ```
 
-`findings` 中每项的通用字段固定为 `{id, issues:[{category,severity,comment,needs_confirmation,edit}]}`。Terminology issue 还必须带 `term_source`、`expected_targets` 和 `term_spans`。检查模块不得输出 corrected；脚本会补齐空结果，并在合并时生成该内部字段。
+`findings` 中每项的通用字段固定为 `{id, issues:[{category,severity,comment,needs_confirmation,edit,resolution_status?,reason_codes?}]}`。Terminology issue 还必须带 `term_source`、`expected_targets` 和 `term_spans`；术语权威不足时可带 `non_authorizing_evidence`。检查模块不得输出 corrected；脚本会补齐空结果，并在合并时生成该内部字段。
 
 ```json
 {
@@ -91,7 +96,7 @@
 
 packet 超过 30 段时，每完成最多 20 个 id 就原子更新一次紧凑草稿的 `reviewed_ids` 和 `findings`。恢复时从 packet 的 `reviewed_ids` 中扣除草稿已记录 id；最终发布前，草稿 `reviewed_ids` 必须与 packet 完全一致。
 
-旧的完整数组流程仍可使用 `lqe_chunk.py ckpt-append`、`ckpt-finalize` 和 `publish-module`，用于兼容历史任务。
+runtime v2 的必需 AI 模块不得使用 `lqe_chunk.py publish-module` 直接发布完整数组；必须经过当前 `review_packets` 和 `lqe_review.py publish`。历史 runtime v1 job 只读。`publish-module` 仅保留给可选 `proper_names`。
 
 ## 模块分工
 

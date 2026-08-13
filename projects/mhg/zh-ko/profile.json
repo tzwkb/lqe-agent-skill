@@ -1,4 +1,5 @@
 {
+  "profile_contract_version": 2,
   "name": "mhg/zh-ko",
   "language_pair": "zh-ko",
   "source_lang": "zh",
@@ -8,6 +9,53 @@
   "style_guide": "sg.md",
   "checks": "checks.json",
   "confirmed_rules": "confirmed_rules.md",
+  "assets": {
+    "style_guide": {
+      "kind": "style_guide",
+      "path": "sg.md",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "style_guide"
+      },
+      "distribution": "internal_only",
+      "availability": "included"
+    },
+    "checks": {
+      "kind": "checks",
+      "path": "checks.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "checks"
+      },
+      "distribution": "internal_only",
+      "availability": "included"
+    },
+    "confirmed_rules": {
+      "kind": "confirmed_rules",
+      "path": "confirmed_rules.md",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "confirmed_rules"
+      },
+      "distribution": "internal_only",
+      "availability": "included"
+    }
+  },
   "wordcount_basis": "source-chars",
   "protected_term_statuses": [],
   "scoring_policy": {
@@ -16,5 +64,40 @@
     "severity_scale": "lisa",
     "critical_gate": false,
     "repeat_dedup": true
+  },
+  "context_pipeline": {
+    "mode": "off"
+  },
+  "capabilities": {
+    "context.core@1": {
+      "required": true,
+      "config": {
+        "identity": {
+          "key_columns": [
+            "key",
+            "Key",
+            "文本ID"
+          ],
+          "fallback": "source_coordinate"
+        },
+        "columns": {
+          "content_type": [
+            "content_type",
+            "text_type",
+            "文本类型",
+            "文本类别",
+            "句段类型"
+          ],
+          "context_note": [
+            "context_note",
+            "上下文备注",
+            "语境备注"
+          ]
+        }
+      }
+    },
+    "source_provenance@1": {
+      "required": true
+    }
   }
 }

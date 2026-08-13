@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lqe.reference-suggestions.v5",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "version", "job_id", "job_runtime_contract_version", "state_revision_digest", "results_basis_digest", "project_asset_snapshot_digest", "capability_resolution_digest", "context_bundle_set_digest", "worker_context_manifest_digest", "protected_signature_digest", "created_at", "reviewed_ids", "selection", "candidate_artifact_digest", "review_artifact_digest", "final_entries", "excluded_ids", "publisher_receipt", "artifact_digest"],
+  "properties": {
+    "schema": {"const": "lqe.reference-suggestions"}, "version": {"const": 5}, "job_id": {"type": "string"}, "job_runtime_contract_version": {"type": "integer", "minimum": 1},
+    "state_revision_digest": {"$ref": "#/$defs/digest"}, "results_basis_digest": {"$ref": "#/$defs/digest"}, "project_asset_snapshot_digest": {"$ref": "#/$defs/digest"}, "capability_resolution_digest": {"$ref": "#/$defs/digest"}, "context_bundle_set_digest": {"$ref": "#/$defs/digest"}, "worker_context_manifest_digest": {"$ref": "#/$defs/digest"}, "protected_signature_digest": {"$ref": "#/$defs/digest"}, "created_at": {"type": "string"},
+    "reviewed_ids": {"type": "array", "items": {"type": "integer"}}, "selection": {"type": "object"}, "candidate_artifact_digest": {"$ref": "#/$defs/digest"}, "review_artifact_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "final_entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}}, "excluded_ids": {"type": "array", "items": {"$ref": "#/$defs/excluded"}}, "publisher_receipt": {"$ref": "#/$defs/receipt"}, "artifact_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entry": {"type": "object", "additionalProperties": false, "required": ["id", "reference_target", "candidate_digest", "risk_route"], "properties": {"id": {"type": "integer"}, "reference_target": {"type": "string"}, "candidate_digest": {"$ref": "#/$defs/digest"}, "risk_route": {"enum": ["deterministic_accept", "independent_verifier"]}}},
+    "excluded": {"type": "object", "additionalProperties": false, "required": ["id", "reason_codes"], "properties": {"id": {"type": "integer"}, "reason_codes": {"type": "array", "minItems": 1, "items": {"type": "string"}}}},
+    "receipt": {"type": "object", "additionalProperties": false, "required": ["publisher", "basis_digest", "receipt_digest"], "properties": {"publisher": {"type": "string"}, "basis_digest": {"$ref": "#/$defs/digest"}, "receipt_digest": {"$ref": "#/$defs/digest"}}}
+  }
+}

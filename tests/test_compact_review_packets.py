@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 import subprocess
@@ -12,7 +13,6 @@ CHUNK_SCRIPT = SCRIPTS / "lqe_chunk.py"
 REVIEW_SCRIPT = SCRIPTS / "lqe_review.py"
 sys.path.insert(0, str(SCRIPTS))
 
-from lqe_engine import build_check_scope
 from lqe_review import build_review_packet, build_worker_batch_plan
 
 
@@ -40,36 +40,47 @@ class CompactReviewPacketTests(unittest.TestCase):
         self.job = Path(self.tempdir.name) / "job"
         self.state_path = self.job / "state.json"
         self.precheck_path = self.job / "errors_precheck.json"
-        self.state = {
-            "artifact_contract_version": 1,
-            "iteration": 0,
-            "source_lang": "zh",
-            "target_lang": "en",
-            "check_scope": build_check_scope(True, "test"),
-            "segments": [
-                {
-                    "id": 0,
-                    "source": "修复错误",
-                    "target": "Fix the eror",
-                    "content_type": "UI/界面文本",
-                    "context_note": "Button tooltip",
-                    "protected_texts": ["{name}"],
-                },
-                {
-                    "id": 1,
-                    "source": "锁定文本",
-                    "target": "Locked text",
-                    "protected": True,
-                    "protected_reason": "SOURCE_LOCKED",
-                },
-                {
-                    "id": 2,
-                    "source": "保留标签",
-                    "target": "Keep tag",
-                    "text_type_context": "战斗/操作提示",
-                },
-            ],
-        }
+        source = Path(self.tempdir.name) / "input.csv"
+        with source.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                ["Key", "Source", "Target", "content_type", "context_note"]
+            )
+            writer.writerow(
+                ["key-0", "修复错误", "Fix the eror", "UI/界面文本", "Button tooltip"]
+            )
+            writer.writerow(["key-1", "锁定文本", "Locked text", "", ""])
+            writer.writerow(["key-2", "保留标签", "Keep tag", "", ""])
+        read = self.run_script(
+            SCRIPTS / "lqe_io.py",
+            "read",
+            "--input",
+            source,
+            "--source-col",
+            "Source",
+            "--target-col",
+            "Target",
+            "--key-col",
+            "Key",
+            "--content-type-col",
+            "content_type",
+            "--context-note-col",
+            "context_note",
+            "--source-lang",
+            "zh",
+            "--target-lang",
+            "en",
+            "--no-terminology",
+            "--out",
+            self.state_path,
+        )
+        self.assertEqual(read.returncode, 0, read.stderr)
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        state["segments"][0]["protected_texts"] = ["{name}"]
+        state["segments"][1]["protected"] = True
+        state["segments"][1]["protected_reason"] = "SOURCE_LOCKED"
+        state["segments"][2]["text_type_context"] = "战斗/操作提示"
+        write_json(self.state_path, state)
         self.precheck = [
             {
                 "id": 0,
@@ -83,7 +94,6 @@ class CompactReviewPacketTests(unittest.TestCase):
                 "issues": [issue("Markup", "The target drops one tag.")],
             },
         ]
-        write_json(self.state_path, self.state)
         write_json(self.precheck_path, self.precheck)
         split = self.run_script(
             CHUNK_SCRIPT,
@@ -127,6 +137,25 @@ class CompactReviewPacketTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
 
+    def draft(self, packet: dict, findings: list[dict], *, reviewed_ids=None) -> dict:
+        return {
+            "schema": "lqe.compact-module-draft",
+            "version": 1,
+            "module": packet["module"],
+            "chunk_id": packet["chunk_id"],
+            "packet_digest": packet["packet_digest"],
+            "worker_batch_id": packet["worker_batch_id"],
+            "worker_packet_basis_digest": packet["worker_packet_basis_digest"],
+            "context_bundle_set_digest": packet["context_bundle_set_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "reviewed_ids": (
+                packet["reviewed_ids"] if reviewed_ids is None else reviewed_ids
+            ),
+            "findings": findings,
+        }
+
     def test_prepare_projects_only_module_relevant_context(self):
         prepared = self.prepare()
         self.assertEqual(prepared.returncode, 0, prepared.stderr)
@@ -149,10 +178,18 @@ class CompactReviewPacketTests(unittest.TestCase):
                 "source",
                 "target",
                 "content_type",
-                "context_note",
                 "kind",
                 "protected_texts",
+                "input_status",
+                "module_review_equivalence_keys",
+                "segment_key",
+                "segment_revision_digest",
+                "context_projection",
             },
+        )
+        self.assertEqual(
+            accuracy["segments"][0]["context_projection"]["core"]["context_note"],
+            "Button tooltip",
         )
         self.assertNotIn("precheck", accuracy["segments"][0])
         self.assertNotIn("term_hits", accuracy["segments"][0])
@@ -181,8 +218,8 @@ class CompactReviewPacketTests(unittest.TestCase):
             {
                 "max_packets_per_worker": 4,
                 "max_review_text_chars_per_worker": 25_000,
-                "max_packet_bytes_per_worker": 100_000,
-                "oversized_single_packet_runs_alone": True,
+                "max_worker_input_bytes": 100_000,
+                "single_minimum_over_budget_fails": True,
             },
         )
 
@@ -234,14 +271,9 @@ class CompactReviewPacketTests(unittest.TestCase):
         draft = self.job / "grammar.compact.json"
         write_json(
             draft,
-            {
-                "schema": "lqe.compact-module-draft",
-                "version": 1,
-                "module": "grammar",
-                "chunk_id": 0,
-                "packet_digest": packet["packet_digest"],
-                "reviewed_ids": packet["reviewed_ids"],
-                "findings": [
+            self.draft(
+                packet,
+                [
                     {
                         "id": 0,
                         "issues": [
@@ -259,7 +291,7 @@ class CompactReviewPacketTests(unittest.TestCase):
                         ],
                     }
                 ],
-            },
+            ),
         )
 
         published = self.run_script(
@@ -300,14 +332,9 @@ class CompactReviewPacketTests(unittest.TestCase):
         draft = self.job / "grammar.minor-edit.json"
         write_json(
             draft,
-            {
-                "schema": "lqe.compact-module-draft",
-                "version": 1,
-                "module": "grammar",
-                "chunk_id": 0,
-                "packet_digest": packet["packet_digest"],
-                "reviewed_ids": packet["reviewed_ids"],
-                "findings": [
+            self.draft(
+                packet,
+                [
                     {
                         "id": 0,
                         "issues": [
@@ -325,7 +352,7 @@ class CompactReviewPacketTests(unittest.TestCase):
                         ],
                     }
                 ],
-            },
+            ),
         )
 
         published = self.run_script(
@@ -354,15 +381,7 @@ class CompactReviewPacketTests(unittest.TestCase):
         draft = self.job / "naturalness.compact.json"
         write_json(
             draft,
-            {
-                "schema": "lqe.compact-module-draft",
-                "version": 1,
-                "module": "naturalness",
-                "chunk_id": 0,
-                "packet_digest": packet["packet_digest"],
-                "reviewed_ids": packet["reviewed_ids"][:-1],
-                "findings": [],
-            },
+            self.draft(packet, [], reviewed_ids=packet["reviewed_ids"][:-1]),
         )
 
         published = self.run_script(

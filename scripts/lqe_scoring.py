@@ -1,5 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
+import hashlib
+import json
 import math
 
 from lqe_engine import (
@@ -19,6 +21,19 @@ DEFAULT_SCORING_POLICY = {
     "critical_gate": False,
     "repeat_dedup": True,
 }
+
+
+def _review_wordcount_digest(state: dict, blocked: set[int]) -> str:
+    payload = json.dumps(
+        {
+            "wordcount": state.get("wordcount", 0),
+            "review_wordcount": state.get("review_wordcount"),
+            "blocked_ids": sorted(blocked),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 _POLICY_KEYS = set(DEFAULT_SCORING_POLICY)
 
 
@@ -163,6 +178,12 @@ def score_errors(
         for segment in state.get("segments", [])
         if segment.get("protected")
     )
+    blocked = {
+        segment["id"]
+        for segment in state.get("segments", [])
+        if segment.get("input_status") == "blocked"
+    }
+    protected.update(blocked)
     segment_map = {
         segment["id"]: (
             str(segment.get("source", "")).strip(),
@@ -213,16 +234,50 @@ def score_errors(
             if severity == "Critical":
                 critical_count += 1
 
-    wordcount = state.get("wordcount", 0)
+    review_wordcount = state.get("review_wordcount")
+    review_digest = state.get("review_wordcount_basis_digest")
+    if (
+        review_wordcount is not None
+        and isinstance(review_digest, str)
+        and review_digest == _review_wordcount_digest(state, blocked)
+    ):
+        wordcount = review_wordcount
+    elif blocked:
+        wordcount = review_wordcount if review_wordcount is not None else 0
+    else:
+        wordcount = state.get("wordcount", 0)
     total_weighted = sum(
         scorecard_category_weight(category, scorecard_profile) * raw
         for category, raw in category_raw.items()
     )
+    if blocked and wordcount == 0:
+        totals = {
+            "score": None,
+            "status": "REVIEW_NOT_RUN",
+            "review_status": "INPUT_BLOCKED",
+            "wordcount": 0,
+            "critical": 0,
+            "npt": None,
+            "critical_gate": False,
+        }
+    else:
+        totals = score_totals(total_weighted, wordcount, critical_count, policy)
     output = {
-        **score_totals(total_weighted, wordcount, critical_count, policy),
+        **totals,
         "errors": total_errors,
         "repeated": repeated_count,
     }
+    if (
+        "review_wordcount" in state
+        or blocked
+        or state.get("job_runtime_contract_version") == 2
+    ):
+        output.update(
+            {
+                "blocked_segments": len(blocked),
+                "total_wordcount": state.get("wordcount", wordcount),
+            }
+        )
     return {
         "output": output,
         "annotated_errors": annotated,

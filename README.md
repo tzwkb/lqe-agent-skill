@@ -55,13 +55,23 @@ lqe-translator/
 └── jobs/<job>/
     ├── state.json
     ├── scope.json
-    ├── source_manifest.json       # SDLXLIFF jobs
+    ├── tabular_source_manifest.json # Tabular jobs
+    ├── source_manifest.json         # SDLXLIFF jobs
     ├── tm_candidates.json         # SDLXLIFF jobs
+    ├── capability_resolution.json
+    ├── project_asset_snapshot.json
+    ├── project_assets/
+    ├── shadow_context/context.json # Shadow mode only
     ├── confirmed_rules.md
     ├── errors_precheck.json
     ├── errors.json
     ├── chunks/
-    ├── review_packets/
+    ├── review_packets/context/<module>/batch_NN/
+    ├── suggestion_context/
+    ├── reference_suggestions.packet.json
+    ├── reference_suggestions.candidates.json
+    ├── suggestion_review.packet.json
+    ├── suggestion_review.json
     ├── reference_suggestions.json
     ├── <job>_lqe.xlsx
     └── <job>_corrected.<csv|tsv|xlsx>
@@ -70,7 +80,7 @@ lqe-translator/
 ## Setup
 
 ```bash
-pip install "openpyxl>=3.1" regex requests python-docx -q
+pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q
 SCRIPTS=~/.codex/skills/lqe-translator/scripts
 ```
 
@@ -237,7 +247,7 @@ chunk_NN.grammar.json
 chunk_NN.naturalness.json
 ```
 
-Assign bounded workers from `batch_plan.json`. One worker handles at most four packets and no more than 25,000 source-plus-target characters or 100,000 packet bytes; an oversized packet runs alone. Every new batch starts a new worker and reloads the module specification and job context.
+Assign bounded workers from `batch_plan.json`. One worker handles at most four packets and no more than 25,000 source-plus-target characters or 100,000 total input bytes across instructions, project context, shared assets, bundles, manifests, and packets. A smallest indivisible unit that still exceeds the limit fails instead of being truncated. Every new batch starts a new worker and reloads the module specification and job context.
 
 The model writes a compact draft: `reviewed_ids` exactly copies the packet, while `findings` contains only ids with issues. Publish it with `lqe_review.py publish --job "$JOB" --chunk <NN> --module <module> --input <draft.json>`. The publisher restores formal full-id coverage and validates ownership, pre-check references, and generation binding under the existing contract.
 
@@ -252,6 +262,10 @@ The compact draft contract is:
   "module": "grammar",
   "chunk_id": 0,
   "packet_digest": "<packet.packet_digest>",
+  "worker_batch_id": "<packet.worker_batch_id>",
+  "worker_packet_basis_digest": "<packet.worker_packet_basis_digest>",
+  "context_bundle_set_digest": "<packet.context_bundle_set_digest>",
+  "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
   "reviewed_ids": [0, 1, 2],
   "findings": [
     {
@@ -289,7 +303,18 @@ Every Terminology issue must also carry `term_source`, `expected_targets`, and `
 
 `term_spans` has exactly the `source` and `target` arrays. Each span object has exactly integer `start`, integer `end`, and non-empty `text`, using a non-empty zero-based, half-open range. Arrays are sorted by `(start,end,text)` and contain no duplicates or overlaps. `text` must exactly equal the corresponding source or current-target slice, and every source-span `text` must equal `term_source`. `source` is non-empty. `target` may be empty when no affected target token can be located safely, including omissions; do not guess or mark the whole sentence. When reviewing a machine-generated Terminology issue, inherit read-only `term_source`, `expected_targets`, and `term_spans.source` through `precheck_ref`, then locate the affected current-target token in `term_spans.target`; leave that array empty only when no token can be marked safely. Newly found Terminology issues must supply all three fields.
 
-The tabular columns `content_type`, `text_type`, `文本类型`, and `文本类别` are passed into review packets as upstream text classifications and are never inferred. `optimized` mode uses row-level `content_type`, then `text_type_context`, to apply the matrix in `references/check_modules/common.md`; `full` keeps the classification as context without changing review intensity. Neither mode disables deterministic checks or required modules.
+The tabular columns `content_type`, `text_type`, `文本类型`, and `文本类别` are passed into review packets as upstream text classifications and are never inferred. `optimized` mode uses row-level `content_type`, then `text_type_context`, to apply the matrix in `references/check_modules/common.md`; `full` keeps the classification as context without changing review intensity. Neither mode disables deterministic checks or required modules. Source text is never skipped because it resembles a section label; only marker rows explicitly declared in profile `tabular.text_type_marker_rules` are consumed and audited.
+
+New jobs also bind stable segment identity, source provenance, and a project asset/capability snapshot. Use `--sheet`, `--key-col`, and repeatable `--context-col FIELD=COLUMN` when the input carries explicit context; aliases include `--content-type-col`, `--speaker-col`, and `--addressee-col`. Optional profile capabilities affect formal packets only in `enforce` mode; `shadow` writes `shadow_context/context.json` and never feeds formal deduplication, review, suggestions, or reports. Legacy `.xls` is read with `xlrd>=2.0` and corrected output is always `.xlsx`.
+
+Profile v2 uses an asset registry to declare path, authority, provenance, and distribution, plus a capability registry to decide which modules may see each resource. Use canonical JSON assets for entities, relationships, review examples, and language policies. Raw XLSX/DOCX may remain as provenance, but merely placing files in a directory never injects them. Each batch's `worker_manifest.json` binds the actual instructions, style guide, language notes, shared assets, context bundles, and packets. Total worker input is capped at 100,000 bytes.
+
+Cross-sheet or cross-version checks use `--pivot-sheet`, `--pivot-key-col`, repeatable `--pivot-compare`, and explicit `--pivot-authority`. Missing, duplicate, or authoritative mismatched keys block review. A historical job without `job_runtime_contract_version: 2` is validation-only; resume it by creating a new bound job:
+
+```bash
+python3 "$SCRIPTS/lqe_io.py" reread \
+  --from-job <old-job> --input <original-input> --job <new-job>
+```
 
 ### 5. Validate, merge, score, and export
 
@@ -315,11 +340,15 @@ When full-sentence reference suggestions are needed, run after merge and calc:
 ```bash
 python3 "$SCRIPTS/lqe_suggestions.py" prepare \
   --job "$JOB" --severities "Major,Critical" --only-missing
-python3 "$SCRIPTS/lqe_suggestions.py" publish \
+python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates \
   --job "$JOB" --input <reference-suggestion-draft.json>
+python3 "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB"
+python3 "$SCRIPTS/lqe_suggestion_review.py" publish-review \
+  --job "$JOB" --input <suggestion-review-draft.json>
+python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
-`optimized` mode defaults the suggestion packet to Major/Critical; `full` defaults to every severity. The agent still decides whether a reliable full suggestion can be submitted, and an omitted suggestion never removes the issue explanation. Suggestion artifacts are version 3; older artifacts must be prepared and published again.
+`optimized` defaults candidates to Major/Critical; `full` defaults to every severity. Unresolved terminology decisions, blocked/protected segments, and constraint conflicts are rejected before generation. Resolved constraints are re-evaluated against the generated candidate: a definite mismatch is rejected, while an inconclusive result goes to the independent verifier. Only accepted candidates enter the v5 final artifact; stale candidate, review, or final digests fail closed.
 
 For a first-round review, explicitly use `single`:
 

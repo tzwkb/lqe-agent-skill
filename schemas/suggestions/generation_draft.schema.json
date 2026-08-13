@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lqe.reference-suggestion-generation-draft.v5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "packet_digest", "worker_context_manifest_digest", "selection", "reviewed_ids", "entries", "abstained_ids"],
+  "properties": {
+    "schema": {"const": "lqe.reference-suggestion-generation-draft"},
+    "version": {"const": 5},
+    "packet_digest": {"$ref": "#/$defs/digest"},
+    "worker_context_manifest_digest": {"$ref": "#/$defs/digest"},
+    "selection": {"type": "object"},
+    "reviewed_ids": {"type": "array", "items": {"type": "integer"}},
+    "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+    "abstained_ids": {"type": "array", "items": {"type": "integer"}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entry": {"type": "object", "additionalProperties": false, "required": ["id", "reference_target"], "properties": {"id": {"type": "integer"}, "reference_target": {"type": "string"}}}
+  }
+}

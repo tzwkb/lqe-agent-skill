@@ -269,7 +269,7 @@ def _cmd_merge_locked(args, job: Path, state: dict):
     if requires_bound_artifacts(state):
         raise SystemExit(
             "[merge] legacy batch outputs cannot publish into a current job; "
-            "use lqe_chunk.py split/publish-module/merge"
+            "use lqe_chunk.py split + lqe_review.py prepare/publish + merge"
         )
     out = build_results(
         state["segments"],

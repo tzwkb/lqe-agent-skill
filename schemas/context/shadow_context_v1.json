@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lqe.shadow-context.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "profile_digest", "capability_resolution_digest", "descriptor_digest", "descriptors", "segments", "artifact_digest"],
+  "properties": {
+    "schema": {"const": "lqe.shadow-context"},
+    "version": {"const": 1},
+    "profile_digest": {"$ref": "#/$defs/digest"},
+    "capability_resolution_digest": {"$ref": "#/$defs/digest"},
+    "descriptor_digest": {"$ref": "#/$defs/digest"},
+    "descriptors": {"type": "object", "minProperties": 1},
+    "segments": {"type": "array", "items": {"$ref": "#/$defs/segment"}},
+    "artifact_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "segment_key", "source_digest", "shadow_context"],
+      "properties": {
+        "id": {"type": "integer"},
+        "segment_key": {"type": "string", "minLength": 1},
+        "source_digest": {"$ref": "#/$defs/digest"},
+        "shadow_context": {"type": "object"}
+      }
+    }
+  }
+}

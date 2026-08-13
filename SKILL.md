@@ -80,6 +80,8 @@ projects/<game>/<source>-<target>/
 
 `language_pair`、`source_lang`、`target_lang` 必填。相对路径以 profile 所在目录为基准。`protected_term_statuses` 只能来自客户资料或用户明确确认；如提供，必须是元素均为非空字符串的数组，空数组表示没有受保护的术语状态。顶层 `threshold` 仅兼容旧 profile；新 profile 使用完整 `scoring_policy`。
 
+新 profile 使用 `profile_contract_version: 2`，并显式声明 `assets`、`context_pipeline` 和 `capabilities`。资料必须登记路径、类型、权威级别、来源、分发级别和可用状态；程序不会扫描目录并自动启用文件。人物/实体、关系、审核示例、上下文规则、来源清单和逐句人工补充分别使用 `lqe.entities`、`lqe.review-examples`、`lqe.context-rules`、`lqe.project-source-manifest`、`lqe.segment-context-overrides` JSON。原始 xlsx/docx 可保留用于追溯，但不直接充当可执行人物关系或语域规则。
+
 目标语言事实放在 `target_languages/<code>/attributes.json`，语言级检查说明放在 `eval_notes.md`。合并顺序为：内置默认 < 语言属性 < 项目 `checks.json` < CLI 参数。
 
 项目规则顺序：实时要求 > `confirmed_rules.md` > 风格指南 > 通用检查方法。运行检查前必须读取项目背景、确认规则、风格指南和语言说明。
@@ -87,7 +89,7 @@ projects/<game>/<source>-<target>/
 ## 2. 初始化
 
 ```bash
-pip install "openpyxl>=3.1" regex requests python-docx -q
+pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q
 
 python "$SCRIPTS/lqe_io.py" read \
   --project "<game>/<source>-<target>" \
@@ -97,6 +99,8 @@ python "$SCRIPTS/lqe_io.py" read \
   --review-mode "<optimized|full>" \
   --out "jobs/<文件名>/state.json"
 ```
+
+旧 `.xls` 通过 `xlrd>=2.0` 只读；corrected 固定输出 `.xlsx`。多工作表用 `--sheet` 明确主表。需要上下文时用 `--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`、`--relationship-stage-col`、`--scene-id-col`、`--scene-tone-col`、`--context-note-col`。程序只采用 profile 已声明并成功协商的能力；`shadow` 仅留审计资料，`enforce` 才影响模块 packet、去重和建议。
 
 SDLXLIFF 初始化：
 
@@ -272,7 +276,7 @@ python "$SCRIPTS/lqe_io.py" pre-check \
 
 ## 6. 检查模块
 
-大文件和小文件都按模块并行检查，并按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 最多处理 4 个 packet，同时不得超过 25,000 原译字符或 100,000 packet 字节；单个超限 packet 独占一个 worker。模块说明位于：
+大文件和小文件都按模块并行检查，并按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 最多处理 4 个 packet，同时不得超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。不可再拆的最小单元仍超限时失败，不截断。模块说明位于：
 
 流程要求 subagent 并行检查时，如果因并发上限、权限、工具不可用或运行环境限制而无法启用，**必须主动询问用户**如何处理；**不得静默回退**为主 Agent 单跑、跳过模块、缩小覆盖范围或降低检查标准。用户明确同意替代方案后才能继续。
 
@@ -386,6 +390,8 @@ python "$SCRIPTS/lqe_review.py" auto-publish --job "$JOB"
 
 `prepare` 在 `review_packets/<module>/` 生成与当前 split generation 绑定的模块专用 packet，并写出 `batch_plan.json` 和 `cost_report.json`。非术语模块不携带术语和预检冗余；受保护段不进入任何 packet；`precheck_review` 只携带其负责类别的已有预检。正式 chunk 保持不变。packet 的 `requires_ai: false` 只能来自这些确定性空结果，`auto-publish` 不处理仍需判断的 packet。
 
+当前 v2 job 还会为每个批次生成 `review_packets/context/<module>/batch_NN/bundle_set.json` 与 `worker_manifest.json`。worker 必须同时读取本批 packet、context bundle set、共享资料索引和 manifest 中列出的 SG/背景/确认规则/语言说明；只有 profile 已声明、能力协商已启用且摘要一致的资料可见。资料缺失、过期、越权、超过字节预算或不能完整投影时失败，不截断后继续。
+
 必需输出由 `state.check_scope` 决定：
 
 ```text
@@ -411,6 +417,10 @@ chunk_NN.naturalness.json
   "module": "grammar",
   "chunk_id": 0,
   "packet_digest": "<packet.packet_digest>",
+  "worker_batch_id": "<packet.worker_batch_id>",
+  "worker_packet_basis_digest": "<packet.worker_packet_basis_digest>",
+  "context_bundle_set_digest": "<packet.context_bundle_set_digest>",
+  "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
   "reviewed_ids": [0, 1, 2],
   "findings": [
     {
@@ -437,7 +447,7 @@ python "$SCRIPTS/lqe_review.py" publish \
   --input <紧凑草稿.json>
 ```
 
-publisher 会从当前正式 chunk 重新派生 packet，拒绝错误 `packet_digest`、缺失审阅 id、空 finding、越权类别、错误预检引用和旧 generation。原 `lqe_chunk.py publish-module` 完整数组入口只保留给历史任务和可选 `proper_names`。packet 超过 30 段时按 `common.md` 每最多 20 个 id 原子更新紧凑草稿。
+publisher 会从当前正式 chunk 重新派生 packet，拒绝错误 `packet_digest`、缺失审阅 id、空 finding、越权类别、错误预检引用和旧 generation。runtime v1 历史任务只读；`lqe_chunk.py publish-module` 完整数组入口仅保留给当前任务的可选 `proper_names`。packet 超过 30 段时按 `common.md` 每最多 20 个 id 原子更新紧凑草稿。
 
 结构检查与合并：
 
@@ -462,12 +472,19 @@ python "$SCRIPTS/lqe_chunk.py" merge \
 python "$SCRIPTS/lqe_suggestions.py" prepare --job "$JOB" \
   [--categories "Company style,Unidiomatic"] \
   [--severities "Major,Critical"] [--only-missing]
-# suggestion worker 按 references/suggestions.md 生成紧凑草稿
-python "$SCRIPTS/lqe_suggestions.py" publish \
-  --job "$JOB" --input <参考建议草稿.json>
+# suggestion worker 按 references/suggestions.md 生成 generation draft
+python "$SCRIPTS/lqe_suggestions.py" publish-candidates \
+  --job "$JOB" --input <reference_suggestions.draft.json>
+python "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB"
+# 独立 verifier 按 references/suggestion_review.md 生成 review draft
+python "$SCRIPTS/lqe_suggestion_review.py" publish-review \
+  --job "$JOB" --input <suggestion_review.draft.json>
+python "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
-参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，Minor 不进入建议 packet，也不生成局部 edit、corrected 或自动迭代修改，并按上游文本分类调整建议口径。`full` 默认纳入 Neutral/Minor/Major/Critical，所有严重度都由 Agent 判断是否能给出安全局部修改或可靠完整建议，不按文本分类改变建议口径。两种模式下，`--categories` 可进一步限定类别，`--only-missing` 只纳入尚无安全局部建议的段；进入候选不代表必须提交，草稿可只提交有可靠方案的 id。publisher 仍强制保留变量、标签、换行和 `protected_texts`，并拒绝受保护段。正式产物 `reference_suggestions.json` 只供报告展示，不写入 `corrected`，不进入 apply、export 或 corrected 文件。未提交建议的有问题段在报告中标为“未生成建议，需人工处理”。
+参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段或约束冲突时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
+
+建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
 
 一键收尾：
 
@@ -590,13 +607,20 @@ jobs/<文件名>/
 ├── errors.json
 ├── chunks/
 ├── review_packets/
+│   └── context/<module>/batch_NN/{bundle_set.json,worker_manifest.json}
+├── suggestion_context/{bundle_set.json,worker_manifest.json}
 ├── reference_suggestions.packet.json
+├── reference_suggestions.candidates.json
+├── suggestion_review.packet.json
+├── suggestion_review.json
 ├── reference_suggestions.json
 ├── <任务名>_lqe.xlsx
 └── <任务名>_corrected.<ext>   # SDLXLIFF job 固定为 .xlsx
 ```
 
 不要修改用户原始 Excel，也不要改写历史 `outputs`。任务产物只写入对应 job 目录。
+
+缺少 `job_runtime_contract_version: 2` 的历史 job 只能查看或验证现有产物，不得继续重新分块、审校、计分、写报告或导出。需要续跑时使用 `lqe_io.py reread --from-job <旧任务> --input <原输入> --job <新任务>`；程序先核对输入摘要、列/格式和逐段覆盖，再原子建立 v2 job，旧任务保持不变。
 
 ## 12. 验证
 

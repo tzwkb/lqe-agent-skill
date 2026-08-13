@@ -5,6 +5,7 @@
 ## 检查内容
 
 - 口吻、正式程度、敬语、人称和角色声音是否符合项目背景与语言说明。
+- 只使用 packet 中正式提供的 speaker/addressee/relationship/scene 与 resolved constraints；缺少受话人或关系时不能仅凭 speaker 猜敬语等级。
 - 文化专有概念是否适合目标受众，是否造成冒犯、敏感风险或明显品牌混淆。
 - 是否照搬源语语序、搭配生硬或缺少目标语言必要的虚词。
 

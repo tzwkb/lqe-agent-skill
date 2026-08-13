@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lqe.suggestion-review-draft.v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "version", "review_packet_digest", "worker_context_manifest_digest", "reviewed_ids", "verdicts"],
+  "properties": {
+    "schema": {"const": "lqe.suggestion-review-draft"}, "version": {"const": 1}, "review_packet_digest": {"$ref": "#/$defs/digest"}, "worker_context_manifest_digest": {"$ref": "#/$defs/digest"}, "reviewed_ids": {"type": "array", "items": {"type": "integer"}}, "verdicts": {"type": "array", "items": {"$ref": "#/$defs/verdict"}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "verdict": {"type": "object", "additionalProperties": false, "required": ["id", "candidate_digest", "decision", "reason_codes", "evidence"], "properties": {"id": {"type": "integer"}, "candidate_digest": {"$ref": "#/$defs/digest"}, "decision": {"enum": ["accept", "reject", "human_required"]}, "reason_codes": {"type": "array", "items": {"type": "string", "minLength": 1}}, "evidence": {"type": "string"}}}
+  }
+}

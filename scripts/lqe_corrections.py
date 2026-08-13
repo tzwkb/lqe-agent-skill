@@ -21,6 +21,9 @@ _ISSUE_FIELDS = (
     "term_spans",
     "protected",
     "repeated",
+    "resolution_status",
+    "reason_codes",
+    "non_authorizing_evidence",
 )
 _EDIT_REQUIRED_FIELDS = {"from", "to", "evidence"}
 _EDIT_OPTIONAL_FIELDS = {"start", "end"}
@@ -40,6 +43,82 @@ _TAG_RE = re.compile(
 _TERM_FIELDS = {"term_source", "expected_targets", "term_spans"}
 _TERM_SPAN_GROUPS = {"source", "target"}
 _TERM_SPAN_FIELDS = {"start", "end", "text"}
+_RESOLUTION_STATUSES = {
+    "resolved",
+    "reference_allowed",
+    "human_choice_required",
+    "conflict",
+}
+_NON_AUTHORIZING_FIELDS = {
+    "source_term",
+    "cannot_authorize_source",
+    "target",
+    "reason",
+}
+
+
+def _canonical_resolution_fields(value: dict, *, label: str) -> dict:
+    output = {}
+    status = value.get("resolution_status")
+    if status is not None:
+        if status not in _RESOLUTION_STATUSES:
+            raise CheckFormatError(f"{label}: resolution_status is invalid")
+        if status == "resolved" and value["needs_confirmation"] is True:
+            raise CheckFormatError(
+                f"{label}: resolved issue must not need confirmation"
+            )
+        if status in {
+            "reference_allowed",
+            "human_choice_required",
+            "conflict",
+        }:
+            if value["needs_confirmation"] is not True:
+                raise CheckFormatError(
+                    f"{label}: {status} issue must need confirmation"
+                )
+            if value.get("edit") is not None:
+                raise CheckFormatError(
+                    f"{label}: {status} issue must set edit to null"
+                )
+        output["resolution_status"] = status
+
+    reason_codes = value.get("reason_codes")
+    if reason_codes is not None:
+        if (
+            not isinstance(reason_codes, list)
+            or not reason_codes
+            or any(
+                not isinstance(code, str) or not code.strip()
+                for code in reason_codes
+            )
+            or len(reason_codes) != len(set(reason_codes))
+        ):
+            raise CheckFormatError(
+                f"{label}: reason_codes must be a unique non-empty string array"
+            )
+        output["reason_codes"] = list(reason_codes)
+
+    evidence = value.get("non_authorizing_evidence")
+    if evidence is not None:
+        if not isinstance(evidence, list) or not evidence:
+            raise CheckFormatError(
+                f"{label}: non_authorizing_evidence must be a non-empty array"
+            )
+        canonical = []
+        for index, item in enumerate(evidence):
+            item_label = f"{label}.non_authorizing_evidence[{index}]"
+            if not isinstance(item, dict) or set(item) != _NON_AUTHORIZING_FIELDS:
+                raise CheckFormatError(f"{item_label}: fields are invalid")
+            if any(
+                not isinstance(item[field], str) or not item[field].strip()
+                for field in _NON_AUTHORIZING_FIELDS
+            ):
+                raise CheckFormatError(
+                    f"{item_label}: values must be non-empty strings"
+                )
+            canonical.append(copy.deepcopy(item))
+        output["non_authorizing_evidence"] = canonical
+    return output
 
 
 def _canonical_term_span_list(
@@ -339,6 +418,12 @@ def _canonical_issue(
         edit = copy.deepcopy(edit) if edit is not None else None
     else:
         edit = None
+    value_with_edit = dict(value)
+    value_with_edit["edit"] = edit
+    canonical_resolution_fields = _canonical_resolution_fields(
+        value_with_edit,
+        label=label,
+    )
     policy = get_review_policy(
         {"review_policy": review_policy} if review_policy is not None else {}
     )
@@ -353,10 +438,18 @@ def _canonical_issue(
             )
 
     result = {
-        key: copy.deepcopy(value[key]) for key in _ISSUE_FIELDS if key in value
+        key: copy.deepcopy(value[key])
+        for key in _ISSUE_FIELDS
+        if key in value
+        and key not in {
+            "resolution_status",
+            "reason_codes",
+            "non_authorizing_evidence",
+        }
     }
     if canonical_term_fields is not None:
         result.update(canonical_term_fields)
+    result.update(canonical_resolution_fields)
     if "precheck_ref" in value:
         precheck_ref = value["precheck_ref"]
         if not isinstance(precheck_ref, str) or not precheck_ref.strip():

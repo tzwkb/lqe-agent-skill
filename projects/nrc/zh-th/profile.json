@@ -1,4 +1,5 @@
 {
+  "profile_contract_version": 2,
   "name": "nrc/zh-th",
   "language_pair": "zh-th",
   "source_lang": "zh",
@@ -9,6 +10,111 @@
   "terminology": "terms_th.json",
   "checks": "checks.json",
   "confirmed_rules": "confirmed_rules.md",
+  "assets": {
+    "style_guide": {
+      "kind": "style_guide",
+      "path": "sources/Style Guide Translation TH_20260430.xlsx",
+      "required": false,
+      "authority": {
+        "issuer": "external_project_source",
+        "level": "unspecified"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "style_guide"
+      },
+      "distribution": "internal_only",
+      "availability": "external"
+    },
+    "terminology": {
+      "kind": "terminology",
+      "path": "terms_th.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "terminology"
+      },
+      "distribution": "internal_only",
+      "availability": "included"
+    },
+    "checks": {
+      "kind": "checks",
+      "path": "checks.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "checks"
+      },
+      "distribution": "internal_only",
+      "availability": "included"
+    },
+    "confirmed_rules": {
+      "kind": "confirmed_rules",
+      "path": "confirmed_rules.md",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "confirmed_rules"
+      },
+      "distribution": "internal_only",
+      "availability": "included"
+    }
+  },
+  "wordcount_basis": "source-chars",
   "threshold": 98,
-  "protected_term_statuses": []
+  "protected_term_statuses": [],
+  "scoring_policy": {
+    "threshold": 98,
+    "scorecard_profile": "legacy",
+    "severity_scale": "lisa",
+    "critical_gate": false,
+    "repeat_dedup": true
+  },
+  "context_pipeline": {
+    "mode": "off"
+  },
+  "capabilities": {
+    "context.core@1": {
+      "required": true,
+      "config": {
+        "identity": {
+          "key_columns": [
+            "key",
+            "Key",
+            "文本ID"
+          ],
+          "fallback": "source_coordinate"
+        },
+        "columns": {
+          "content_type": [
+            "content_type",
+            "text_type",
+            "文本类型",
+            "文本类别",
+            "句段类型"
+          ],
+          "context_note": [
+            "context_note",
+            "上下文备注",
+            "语境备注"
+          ]
+        }
+      }
+    },
+    "source_provenance@1": {
+      "required": true
+    }
+  }
 }

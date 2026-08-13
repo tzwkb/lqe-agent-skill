@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/context_bundle_v1.json",
+  "title": "LQE module context bundle v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "module",
+    "segment_revision_digest",
+    "project_asset_snapshot_digest",
+    "capability_resolution_digest",
+    "module_view",
+    "segment",
+    "entity_fact_ids",
+    "relation_ids",
+    "resolved_constraints",
+    "neighbors",
+    "runtime_example_ids",
+    "term_evidence_ids",
+    "context_status",
+    "context_bundle_digest"
+  ],
+  "properties": {
+    "schema": {"const": "lqe.context-bundle"},
+    "version": {"const": 1},
+    "module": {"$ref": "#/$defs/nonempty"},
+    "segment_revision_digest": {"$ref": "#/$defs/sha256"},
+    "project_asset_snapshot_digest": {"$ref": "#/$defs/sha256"},
+    "capability_resolution_digest": {"$ref": "#/$defs/sha256"},
+    "module_view": {"$ref": "#/$defs/module_view"},
+    "segment": {
+      "type": "object",
+      "required": [
+        "identity",
+        "source",
+        "current_target",
+        "input_status",
+        "context",
+        "protection"
+      ],
+      "properties": {
+        "identity": {"$ref": "#/$defs/identity"},
+        "source": {"type": "string"},
+        "current_target": {"type": "string"},
+        "input_status": {"enum": ["ready", "blocked"]},
+        "input_block_reasons": {"type": "array", "items": {}},
+        "input_warnings": {"type": "array", "items": {}},
+        "context": {"type": "object"},
+        "protection": {"$ref": "#/$defs/protection"}
+      },
+      "additionalProperties": false
+    },
+    "entity_fact_ids": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "relation_ids": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "resolved_constraints": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "neighbors": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/neighbor"}
+    },
+    "runtime_example_ids": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "term_evidence_ids": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "context_status": {
+      "enum": [
+        "ready",
+        "incomplete",
+        "conflict",
+        "disabled",
+        "blocked",
+        "protected",
+        "unknown"
+      ]
+    },
+    "context_bundle_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "module_view": {
+      "type": "object",
+      "required": [
+        "capabilities",
+        "dimensions",
+        "constraint_kinds",
+        "include_constraints",
+        "neighbors",
+        "limits"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "constraint_kinds": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "include_constraints": {"type": "boolean"},
+        "neighbors": {
+          "type": "object",
+          "required": ["before", "after", "include_target"],
+          "properties": {
+            "before": {"type": "integer", "minimum": 0},
+            "after": {"type": "integer", "minimum": 0},
+            "include_target": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "required": [
+            "max_facts_per_entity",
+            "max_relations",
+            "max_runtime_examples"
+          ],
+          "properties": {
+            "max_facts_per_entity": {"type": "integer", "minimum": 0},
+            "max_relations": {"type": "integer", "minimum": 0},
+            "max_runtime_examples": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "required": ["id", "segment_key", "key_origin", "source_digest"],
+      "properties": {
+        "id": {"oneOf": [{"type": "integer"}, {"type": "string", "minLength": 1}]},
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "key_origin": {"enum": ["input", "generated"]},
+        "source_digest": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "protection": {
+      "type": "object",
+      "required": ["protected", "reason", "protected_texts"],
+      "properties": {
+        "protected": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]},
+        "protected_texts": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "neighbor": {
+      "type": "object",
+      "required": [
+        "id",
+        "segment_key",
+        "source",
+        "input_status",
+        "protected",
+        "context",
+        "target",
+        "target_status"
+      ],
+      "properties": {
+        "id": {"oneOf": [{"type": "integer"}, {"type": "string", "minLength": 1}]},
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "source": {"type": "string"},
+        "input_status": {"const": "ready"},
+        "protected": {"const": false},
+        "context": {"type": "object"},
+        "target": {"type": ["string", "null"]},
+        "target_status": {"enum": ["omitted", "verified", "unverified"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

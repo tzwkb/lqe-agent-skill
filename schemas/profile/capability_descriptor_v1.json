@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/lqe/context-capability-descriptor-v1.json",
+  "title": "LQE safe declarative context capability descriptor v1",
+  "type": "object",
+  "required": ["schema", "version", "id", "fields", "module_views"],
+  "properties": {
+    "schema": {"const": "lqe.context-capability-descriptor"},
+    "version": {"const": 1},
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]*(/[a-z][a-z0-9_.-]*)*@[1-9][0-9]*$"
+    },
+    "applies_when": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": ["string", "integer", "boolean"]}
+      }
+    },
+    "fields": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {"enum": ["string", "integer", "boolean", "enum"]},
+          "cardinality": {"enum": ["one", "many"]},
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "columns": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "oneOf": [
+                {"type": "string", "minLength": 1},
+                {"type": "integer", "minimum": 0}
+              ]
+            }
+          },
+          "required_when_applicable": {"type": "boolean"},
+          "normalizer": {
+            "enum": [
+              "identity",
+              "trim",
+              "lowercase",
+              "positive_integer",
+              "string_list"
+            ]
+          },
+          "affects_review_equivalence": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "module_views": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "terminology",
+          "precheck_review",
+          "accuracy",
+          "grammar",
+          "naturalness",
+          "proper_names",
+          "term_audit",
+          "suggestions"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "comparison_rules": {"type": "object"},
+    "window_rules": {
+      "type": "object",
+      "properties": {
+        "before": {"type": "integer", "minimum": 0, "maximum": 20},
+        "after": {"type": "integer", "minimum": 0, "maximum": 20}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

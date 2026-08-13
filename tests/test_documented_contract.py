@@ -197,7 +197,7 @@ class DocumentedContractTests(unittest.TestCase):
             "cost_report.json",
             "每个 worker 最多处理 4 个 packet",
             "25,000 原译字符",
-            "100,000 packet 字节",
+            "总输入不得超过 100,000 字节",
             "新批次必须新建 worker",
         ):
             with self.subTest(phrase=phrase):
@@ -253,11 +253,13 @@ class DocumentedContractTests(unittest.TestCase):
 
     def test_reference_suggestions_keep_agent_reliability_judgment(self):
         for phrase in (
-            '"version": 3',
+            '"version": 5',
             '"severities": ["Critical", "Major"]',
-            "严重度只决定候选范围",
-            "Agent 判断为可靠",
-            "优先读取非空 `content_type`",
+            "模型生成的整句建议必须通过独立 verifier",
+            "`entries.id ∪ abstained_ids`",
+            "优先读取 `content_type`",
+            "术语模块留下 `needs_confirmation: true`",
+            "`independent_verifier`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.suggestions)
@@ -402,7 +404,7 @@ class DocumentedContractTests(unittest.TestCase):
             "AI/建议译文中新增或替换的内容显示为红色字体",
             "corrected 文件不添加差异样式",
             "openpyxl>=3.1",
-            'openpyxl>=3.1" regex',
+            '"jsonschema>=4.20" regex',
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.skill)
