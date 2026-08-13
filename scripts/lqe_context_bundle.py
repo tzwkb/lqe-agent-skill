@@ -70,6 +70,7 @@ FOUNDATION_ASSET_KINDS = frozenset(
         "segment_context_overrides",
     }
 )
+FORMAL_CAPABILITY_EFFECTS = frozenset({"foundation", "enforce"})
 VERIFIED_STATUSES = frozenset({"verified", "source_backed"})
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _MODULE_VIEW_KEYS = frozenset(
@@ -409,7 +410,10 @@ def _validate_generated_asset_bindings(
 
 
 def _enabled_asset_bindings(
-    snapshot: Mapping, resolution: Mapping
+    snapshot: Mapping,
+    resolution: Mapping,
+    *,
+    effects: frozenset[str] | None = None,
 ) -> dict[str, list[str]]:
     """Return enabled capability references after checking snapshot binding."""
 
@@ -419,6 +423,8 @@ def _enabled_asset_bindings(
             raise ContextBundleError(
                 f"enabled capability {capability_id!r} must be an object"
             )
+        if effects is not None and raw_item.get("effect") not in effects:
+            continue
         if "asset" not in raw_item:
             continue
         asset_id = _nonempty_text(
@@ -747,6 +753,19 @@ def _active_context_registry(state: Mapping) -> dict[str, dict]:
     return output
 
 
+def _formal_capability_summary(resolution: Mapping) -> dict[str, list[str]]:
+    enabled = {
+        capability_id
+        for capability_id, item in resolution["enabled"].items()
+        if isinstance(item, Mapping)
+        and item.get("effect") in FORMAL_CAPABILITY_EFFECTS
+    }
+    return {
+        "enabled": sorted(enabled),
+        "disabled": [],
+    }
+
+
 def _extension_name(capability_id: str) -> str:
     raw = capability_id.removeprefix("context.")
     return re.sub(r"@[1-9][0-9]*$", "", raw)
@@ -784,7 +803,8 @@ def normalize_module_view(
         default=inferred_capabilities,
     )
     _, resolution = _validate_state_bindings(state)
-    inactive = sorted(set(capabilities) - set(resolution["enabled"]))
+    formal_capabilities = set(_formal_capability_summary(resolution)["enabled"])
+    inactive = sorted(set(capabilities) - formal_capabilities)
     if inactive:
         raise ContextBundleError(
             f"module view references inactive capabilities: {inactive}"
@@ -1618,10 +1638,7 @@ def build_context_bundle_set(
         "schema": "lqe.context-bundle-set",
         "version": 1,
         "module": _nonempty_text(module, "module"),
-        "capabilities": {
-            "enabled": sorted(resolution["enabled"]),
-            "disabled": sorted(resolution["disabled"]),
-        },
+        "capabilities": _formal_capability_summary(resolution),
         "shared_context_assets": _shared_context_assets(bundles, assets),
         "bundles": bundles,
     }
@@ -1769,6 +1786,8 @@ def _instruction_paths(
 def _providers(resolution: Mapping) -> list[dict]:
     output = []
     for capability_id, item in sorted(resolution["enabled"].items()):
+        if item.get("effect") not in FORMAL_CAPABILITY_EFFECTS:
+            continue
         provider = item.get("provider")
         if not isinstance(provider, Mapping):
             continue
@@ -1789,7 +1808,11 @@ def _project_asset_summaries(
     resolution: Mapping,
     loaded_assets: Mapping,
 ) -> list[dict]:
-    enabled_assets = _enabled_asset_bindings(snapshot, resolution)
+    enabled_assets = _enabled_asset_bindings(
+        snapshot,
+        resolution,
+        effects=FORMAL_CAPABILITY_EFFECTS,
+    )
     visible_assets = set(enabled_assets)
     visible_assets.update(
         asset_id
@@ -1900,10 +1923,7 @@ def build_worker_context_manifest(
     module = _nonempty_text(module, "module")
     if bundle_set["module"] != module:
         raise ContextBundleError("worker module differs from context bundle set")
-    expected_capabilities = {
-        "enabled": sorted(resolution["enabled"]),
-        "disabled": sorted(resolution["disabled"]),
-    }
+    expected_capabilities = _formal_capability_summary(resolution)
     if bundle_set["capabilities"] != expected_capabilities:
         raise ContextBundleError(
             "context bundle set belongs to another capability resolution"

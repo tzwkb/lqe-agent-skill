@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -12,6 +13,12 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from lqe_split_contract import state_revision_payload
+from lqe_profile_ingest import build_project_source_manifest
+from lqe_context_bundle import (
+    ContextBundleError,
+    build_context_bundle_set,
+    build_worker_context_manifest,
+)
 
 
 def asset(kind: str, path: str) -> dict:
@@ -29,10 +36,10 @@ def asset(kind: str, path: str) -> dict:
 def project_profile(mode: str) -> dict:
     return {
         "profile_contract_version": 2,
-        "name": f"mode-test-{mode}",
-        "language_pair": "zh-en",
+        "name": "mode-test",
+        "language_pair": "zh-ko",
         "source_lang": "zh",
-        "target_lang": "en",
+        "target_lang": "ko",
         "wordcount_basis": "source-chars",
         "scoring_policy": {
             "threshold": 98,
@@ -46,6 +53,11 @@ def project_profile(mode: str) -> dict:
         "assets": {
             "checks": asset("checks", "checks.json"),
             "rules": asset("confirmed_rules", "confirmed_rules.md"),
+            "entities": asset("entity_registry", "entities.json"),
+            "project_sources": asset(
+                "project_source_manifest",
+                "provenance/project_sources.json",
+            ),
         },
         "context_pipeline": {"mode": mode},
         "capabilities": {
@@ -55,13 +67,24 @@ def project_profile(mode: str) -> dict:
                     "columns": {"content_type": ["Content Type"]}
                 },
             },
-            "source_provenance@1": {"required": True},
+            "source_provenance@1": {
+                "required": True,
+                "asset": "project_sources",
+            },
             "context.dialogue@1": {
                 "required": False,
                 "config": {
                     "columns": {"speaker_id": ["Speaker"]},
                     "applies_when": {"content_type": ["dialogue"]},
                 },
+            },
+            "assets.entity_registry@1": {
+                "required": False,
+                "asset": "entities",
+            },
+            "language_policy.register@1": {
+                "required": False,
+                "provider": "ko.register@1",
             },
         },
     }
@@ -93,6 +116,66 @@ class ContextPipelineModeTests(unittest.TestCase):
         (project / "checks.json").write_text("{}", encoding="utf-8")
         (project / "confirmed_rules.md").write_text(
             "# Confirmed rules\n", encoding="utf-8"
+        )
+        (project / "entities.json").write_text(
+            json.dumps(
+                {
+                    "schema": "lqe.entities",
+                    "version": 1,
+                    "entities": [],
+                    "relations": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        coverage_details = {"records": []}
+        provenance = project / "provenance"
+        provenance.mkdir()
+        (provenance / "coverage.json").write_text(
+            json.dumps(coverage_details),
+            encoding="utf-8",
+        )
+        entities_digest = hashlib.sha256(
+            (project / "entities.json").read_bytes()
+        ).hexdigest()
+        manifest = build_project_source_manifest(
+            project="mode-test",
+            manifest_scope="internal",
+            sources=[
+                {
+                    "id": "source.entities",
+                    "kind": "entity_source",
+                    "sha256": "a" * 64,
+                    "verification_status": "verified",
+                    "distribution": "internal_only",
+                    "authority": {"issuer": "test"},
+                    "availability": "external",
+                }
+            ],
+            generated_assets=[
+                {
+                    "asset_id": "entities",
+                    "kind": "entity_registry",
+                    "path": "entities.json",
+                    "sha256": entities_digest,
+                    "derived_from": ["source.entities"],
+                    "distribution": "internal_only",
+                    "generator": {"name": "test", "version": 1},
+                }
+            ],
+            coverage={
+                "total_nonempty": 0,
+                "converted": 0,
+                "normalized": 0,
+                "ignored": 0,
+                "unmapped": 0,
+                "details_path": "coverage.json",
+            },
+            coverage_details=coverage_details,
+        )
+        (provenance / "project_sources.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
         (project / "profile.json").write_text(
             json.dumps(project_profile(mode), ensure_ascii=False, indent=2),
@@ -160,6 +243,33 @@ class ContextPipelineModeTests(unittest.TestCase):
         return json.loads(
             (job / "chunks" / "dedup_map.json").read_text(encoding="utf-8")
         )
+
+    def worker_view(self, state: dict) -> tuple[dict, dict]:
+        bundle_set = build_context_bundle_set(
+            state,
+            state["segments"],
+            "suggestions",
+        )
+        manifest = build_worker_context_manifest(
+            state,
+            "suggestions",
+            bundle_set,
+            max_worker_bytes=100_000,
+        )
+        return bundle_set, manifest
+
+    @staticmethod
+    def formal_bundles(bundle_set: dict) -> list[dict]:
+        excluded = {
+            "context_bundle_digest",
+            "project_asset_snapshot_digest",
+            "capability_resolution_digest",
+            "segment_revision_digest",
+        }
+        return [
+            {key: value for key, value in bundle.items() if key not in excluded}
+            for bundle in bundle_set["bundles"]
+        ]
 
     def test_off_shadow_and_enforce_formal_truth(self):
         jobs_and_states = {
@@ -265,6 +375,67 @@ class ContextPipelineModeTests(unittest.TestCase):
         self.assertNotEqual(
             enforce["segments"][0]["module_review_equivalence_keys"]["accuracy"],
             enforce["segments"][1]["module_review_equivalence_keys"]["accuracy"],
+        )
+
+        off_bundle, off_manifest = self.worker_view(off)
+        shadow_bundle, shadow_manifest = self.worker_view(shadow)
+        enforce_bundle, enforce_manifest = self.worker_view(enforce)
+
+        self.assertEqual(off_bundle["capabilities"], shadow_bundle["capabilities"])
+        self.assertEqual(
+            set(shadow_bundle["capabilities"]["enabled"]),
+            {"context.core@1", "source_provenance@1"},
+        )
+        self.assertEqual(shadow_bundle["capabilities"]["disabled"], [])
+        self.assertEqual(
+            off_bundle["shared_context_assets"],
+            shadow_bundle["shared_context_assets"],
+        )
+        self.assertEqual(
+            self.formal_bundles(off_bundle),
+            self.formal_bundles(shadow_bundle),
+        )
+        self.assertNotEqual(
+            off_bundle["context_bundle_set_digest"],
+            shadow_bundle["context_bundle_set_digest"],
+        )
+
+        self.assertEqual(
+            off_manifest["project_assets"],
+            shadow_manifest["project_assets"],
+        )
+        self.assertEqual(
+            off_manifest["language_providers"],
+            shadow_manifest["language_providers"],
+        )
+        self.assertEqual(shadow_manifest["language_providers"], [])
+        self.assertNotIn(
+            "entities",
+            {item["asset_id"] for item in shadow_manifest["project_assets"]},
+        )
+        shadow_with_forced_asset_view = json.loads(json.dumps(shadow))
+        shadow_with_forced_asset_view["module_context_views"] = {
+            "suggestions": {
+                "capabilities": [
+                    "context.core@1",
+                    "assets.entity_registry@1",
+                ]
+            }
+        }
+        with self.assertRaisesRegex(ContextBundleError, "inactive capabilities"):
+            self.worker_view(shadow_with_forced_asset_view)
+
+        self.assertIn(
+            "assets.entity_registry@1",
+            enforce_bundle["capabilities"]["enabled"],
+        )
+        self.assertIn(
+            "entities",
+            {item["asset_id"] for item in enforce_manifest["project_assets"]},
+        )
+        self.assertEqual(
+            [item["id"] for item in enforce_manifest["language_providers"]],
+            ["ko.register"],
         )
 
 
