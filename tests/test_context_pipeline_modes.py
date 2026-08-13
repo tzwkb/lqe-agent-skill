@@ -74,7 +74,10 @@ def project_profile(mode: str) -> dict:
             "context.dialogue@1": {
                 "required": False,
                 "config": {
-                    "columns": {"speaker_id": ["Speaker"]},
+                    "columns": {
+                        "speaker_id": ["Speaker"],
+                        "addressee_ids": ["Addressee"],
+                    },
                     "applies_when": {"content_type": ["dialogue"]},
                 },
             },
@@ -98,13 +101,34 @@ class ContextPipelineModeTests(unittest.TestCase):
         with self.input_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(
-                ["Key", "Source", "Target", "Content Type", "Speaker"]
+                [
+                    "Key",
+                    "Source",
+                    "Target",
+                    "Content Type",
+                    "Speaker",
+                    "Addressee",
+                ]
             )
             writer.writerow(
-                ["business-a", "Same source", "Same target", "dialogue", "speaker-a"]
+                [
+                    "business-a",
+                    "Same source",
+                    "Same target",
+                    "dialogue",
+                    "speaker-a",
+                    "listener-a",
+                ]
             )
             writer.writerow(
-                ["business-b", "Same source", "Same target", "dialogue", "speaker-b"]
+                [
+                    "business-b",
+                    "Same source",
+                    "Same target",
+                    "dialogue",
+                    "speaker-b",
+                    "listener-b",
+                ]
             )
 
     def tearDown(self):
@@ -183,31 +207,60 @@ class ContextPipelineModeTests(unittest.TestCase):
         )
         return project
 
-    def read_mode(self, mode: str) -> tuple[Path, dict]:
+    def run_read_mode(
+        self,
+        mode: str,
+        *,
+        explicit_context: bool = False,
+    ) -> tuple[Path, subprocess.CompletedProcess]:
         project = self.make_project(mode)
         job = self.root / f"job-{mode}"
+        command = [
+            sys.executable,
+            str(SCRIPTS / "lqe_io.py"),
+            "read",
+            "--input",
+            str(self.input_path),
+            "--project",
+            str(project),
+            "--source-col",
+            "Source",
+            "--target-col",
+            "Target",
+            "--key-col",
+            "Key",
+            "--no-terminology",
+            "--out",
+            str(job / "state.json"),
+        ]
+        if explicit_context:
+            command.extend(
+                [
+                    "--content-type-col",
+                    "Content Type",
+                    "--speaker-col",
+                    "Speaker",
+                    "--addressee-col",
+                    "Addressee",
+                ]
+            )
         result = subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPTS / "lqe_io.py"),
-                "read",
-                "--input",
-                str(self.input_path),
-                "--project",
-                str(project),
-                "--source-col",
-                "Source",
-                "--target-col",
-                "Target",
-                "--key-col",
-                "Key",
-                "--no-terminology",
-                "--out",
-                str(job / "state.json"),
-            ],
+            command,
             cwd=ROOT,
             text=True,
             capture_output=True,
+        )
+        return job, result
+
+    def read_mode(
+        self,
+        mode: str,
+        *,
+        explicit_context: bool = False,
+    ) -> tuple[Path, dict]:
+        job, result = self.run_read_mode(
+            mode,
+            explicit_context=explicit_context,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return job, json.loads((job / "state.json").read_text(encoding="utf-8"))
@@ -437,6 +490,58 @@ class ContextPipelineModeTests(unittest.TestCase):
             [item["id"] for item in enforce_manifest["language_providers"]],
             ["ko.register"],
         )
+
+    def test_explicit_shadow_columns_are_shadow_only(self):
+        _, shadow = self.read_mode("shadow", explicit_context=True)
+        _, enforce = self.read_mode("enforce", explicit_context=True)
+        off_job, off_result = self.run_read_mode("off", explicit_context=True)
+
+        shadow_segment = shadow["segments"][0]
+        self.assertNotIn("dialogue", shadow_segment["context"]["extensions"])
+        self.assertEqual(
+            shadow_segment["shadow_context"]["extensions"]["dialogue"],
+            {
+                "status": "ready",
+                "speaker_id": "speaker-a",
+                "addressee_ids": ["listener-a"],
+            },
+        )
+        self.assertEqual(
+            shadow["context_cols"]["context.core@1.content_type"]["method"],
+            "cli",
+        )
+        self.assertNotIn(
+            "context.dialogue@1.speaker_id",
+            shadow["context_cols"],
+        )
+        shadow_source_manifest = json.loads(
+            Path(shadow["tabular_source_manifest_path"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            shadow_source_manifest["shadow_context_columns"][
+                "context.dialogue@1.speaker_id"
+            ]["method"],
+            "cli",
+        )
+
+        enforce_dialogue = enforce["segments"][0]["context"]["extensions"][
+            "dialogue"
+        ]
+        self.assertEqual(enforce_dialogue["speaker_id"], "speaker-a")
+        self.assertEqual(enforce_dialogue["addressee_ids"], ["listener-a"])
+        self.assertEqual(
+            enforce["context_cols"]["context.dialogue@1.speaker_id"]["method"],
+            "cli",
+        )
+
+        self.assertNotEqual(off_result.returncode, 0)
+        self.assertIn(
+            "unknown context field: speaker_id",
+            off_result.stdout + off_result.stderr,
+        )
+        self.assertFalse((off_job / "state.json").exists())
 
 
 if __name__ == "__main__":

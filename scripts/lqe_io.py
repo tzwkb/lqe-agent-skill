@@ -125,6 +125,7 @@ from lqe_context import (
     descriptor_registry,
     extract_segment_context,
     module_review_equivalence_key,
+    parse_context_columns,
     resolve_context_columns,
 )
 from lqe_language_policies import (
@@ -735,6 +736,29 @@ def _context_cli_specs(args) -> list[str]:
         if value is not None:
             specs.append(f"{field}={value}")
     return specs
+
+
+def _context_cli_specs_for_registry(
+    specs: list[str],
+    *,
+    source_registry: dict,
+    target_registry: dict,
+) -> dict[str, object]:
+    target_fields = {
+        f"{capability_id}.{field_name}"
+        for capability_id, descriptor in target_registry.items()
+        for field_name in descriptor.get("fields", {})
+    }
+    selected = {}
+    for raw_ref, column in parse_context_columns(specs).items():
+        canonical = canonical_field_ref(raw_ref, source_registry)
+        if canonical in selected:
+            raise ContextContractError(
+                f"duplicate CLI mapping for context field: {canonical}"
+            )
+        if canonical in target_fields:
+            selected[canonical] = column
+    return selected
 
 
 _PIVOT_BUILTIN_FIELDS = {"source", "target", "key"}
@@ -2391,23 +2415,33 @@ def _cmd_read_locked(args):
             and resolution.get("context_pipeline_mode") == "shadow"
             else None
         )
-        resolved_context_columns = resolve_context_columns(
-            headers,
-            registry,
-            cli_columns=_context_cli_specs(args),
-            profile=normalized_profile,
-            no_header=no_header,
-        )
+        context_cli_specs = _context_cli_specs(args)
         shadow_context_columns = (
             resolve_context_columns(
                 headers,
                 shadow_registry,
-                cli_columns=_context_cli_specs(args),
+                cli_columns=context_cli_specs,
                 profile=normalized_profile,
                 no_header=no_header,
             )
             if shadow_registry is not None
             else None
+        )
+        formal_context_cli_specs = (
+            _context_cli_specs_for_registry(
+                context_cli_specs,
+                source_registry=shadow_registry,
+                target_registry=registry,
+            )
+            if shadow_registry is not None
+            else context_cli_specs
+        )
+        resolved_context_columns = resolve_context_columns(
+            headers,
+            registry,
+            cli_columns=formal_context_cli_specs,
+            profile=normalized_profile,
+            no_header=no_header,
         )
         pivot_guard_config = _prepare_pivot_guard(
             args,
