@@ -82,6 +82,8 @@ projects/<game>/<source>-<target>/
 
 新 profile 使用 `profile_contract_version: 2`，并显式声明 `assets`、`context_pipeline` 和 `capabilities`。资料必须登记路径、类型、权威级别、来源、分发级别和可用状态；程序不会扫描目录并自动启用文件。人物/实体、关系、审核示例、上下文规则、来源清单和逐句人工补充分别使用 `lqe.entities`、`lqe.review-examples`、`lqe.context-rules`、`lqe.project-source-manifest`、`lqe.segment-context-overrides` JSON。原始 xlsx/docx 可保留用于追溯，但不直接充当可执行人物关系或语域规则。
 
+需要向模块提供人物事实、邻句或审核案例时，在 profile 的 `module_context_views` 中按模块声明 capability、dimension、邻句窗口和数量上限。`max_runtime_examples: 0` 表示不提供案例，不是“自动选择”。`off` 不启用 optional view；`shadow` 只把 view 写入 `state.shadow_module_context_views` 供审计；只有 `enforce` 才写入正式 `state.module_context_views`。shadow typed asset 即使声明 core capability，也不得进入正式 bundle、shared assets 或 worker manifest；关系若显式带 `attributes.runtime_rule: false`，不得作为运行上下文。
+
 目标语言事实放在 `target_languages/<code>/attributes.json`，语言级检查说明放在 `eval_notes.md`。合并顺序为：内置默认 < 语言属性 < 项目 `checks.json` < CLI 参数。
 
 项目规则顺序：实时要求 > `confirmed_rules.md` > 风格指南 > 通用检查方法。运行检查前必须读取项目背景、确认规则、风格指南和语言说明。

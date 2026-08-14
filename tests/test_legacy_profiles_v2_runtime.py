@@ -13,6 +13,7 @@ from lqe_capabilities import (
     resolve_capabilities,
     validate_capability_resolution,
 )
+from lqe_context import descriptor_registry
 from lqe_project_assets import (
     LEGACY_ASSET_FIELDS,
     asset_statuses,
@@ -204,6 +205,10 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                     normalized,
                     asset_statuses=statuses,
                 )
+                descriptors = descriptor_registry(
+                    normalized,
+                    capability_resolution=resolution,
+                )
 
                 validate_capability_resolution(resolution)
                 self.assertEqual(resolution, repeated)
@@ -215,6 +220,11 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                     self.assertEqual(
                         resolution["enabled"][capability_id]["effect"], "foundation"
                     )
+                self.assertIn(
+                    "identity",
+                    normalized["capabilities"]["context.core@1"]["config"],
+                )
+                self.assertNotIn("identity", descriptors["context.core@1"])
                 for capability_id in builtins - FOUNDATIONS:
                     self.assertEqual(
                         resolution["disabled"][capability_id]["reason"],

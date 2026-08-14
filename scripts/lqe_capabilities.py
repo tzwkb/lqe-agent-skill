@@ -45,6 +45,22 @@ MODULE_NAMES = frozenset(
         "suggestions",
     }
 )
+_MODULE_CONTEXT_VIEW_KEYS = frozenset(
+    {
+        "capabilities",
+        "dimensions",
+        "constraint_kinds",
+        "include_constraints",
+        "neighbors",
+        "limits",
+    }
+)
+_MODULE_CONTEXT_NEIGHBOR_KEYS = frozenset(
+    {"before", "after", "include_target"}
+)
+_MODULE_CONTEXT_LIMIT_KEYS = frozenset(
+    {"max_facts_per_entity", "max_relations", "max_runtime_examples"}
+)
 
 _CAPABILITY_ID_RE = re.compile(
     r"^[a-z][a-z0-9_.-]*(?:/[a-z][a-z0-9_.-]*)*@[1-9][0-9]*$"
@@ -801,6 +817,134 @@ def _normalize_tabular_adapter(value: object) -> dict:
     return {"text_type_marker_rules": output}
 
 
+def _normalize_module_context_views(
+    value: object,
+    capabilities: Mapping[str, object],
+) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ProfileContractError("profile.module_context_views must be an object")
+    output = {}
+    declared_capabilities = set(capabilities)
+    for module in sorted(value):
+        if module not in MODULE_NAMES:
+            raise ProfileContractError(
+                f"profile.module_context_views has unknown module {module!r}"
+            )
+        raw_view = value[module]
+        if not isinstance(raw_view, dict):
+            raise ProfileContractError(
+                f"profile.module_context_views.{module} must be an object"
+            )
+        unknown = sorted(set(raw_view) - _MODULE_CONTEXT_VIEW_KEYS)
+        if unknown:
+            raise ProfileContractError(
+                f"profile.module_context_views.{module} has unknown fields: {unknown}"
+            )
+        view = {}
+        if "capabilities" in raw_view:
+            selected = _validate_string_list(
+                raw_view["capabilities"],
+                f"profile.module_context_views.{module}.capabilities",
+            )
+            invalid_ids = sorted(
+                item for item in selected if not _CAPABILITY_ID_RE.fullmatch(item)
+            )
+            if invalid_ids:
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.capabilities has invalid ids: "
+                    f"{invalid_ids}"
+                )
+            undeclared = sorted(set(selected) - declared_capabilities)
+            if undeclared:
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.capabilities references "
+                    f"undeclared capabilities: {undeclared}"
+                )
+            if "context.core@1" not in selected:
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.capabilities must include "
+                    "context.core@1"
+                )
+            view["capabilities"] = sorted(selected)
+        for field in ("dimensions", "constraint_kinds"):
+            if field in raw_view:
+                view[field] = sorted(
+                    _validate_string_list(
+                        raw_view[field],
+                        f"profile.module_context_views.{module}.{field}",
+                        allow_empty=True,
+                    )
+                )
+        if "include_constraints" in raw_view:
+            include_constraints = raw_view["include_constraints"]
+            if type(include_constraints) is not bool:
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.include_constraints "
+                    "must be boolean"
+                )
+            view["include_constraints"] = include_constraints
+        if "neighbors" in raw_view:
+            raw_neighbors = raw_view["neighbors"]
+            if not isinstance(raw_neighbors, dict):
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.neighbors must be an object"
+                )
+            unknown_neighbors = sorted(
+                set(raw_neighbors) - _MODULE_CONTEXT_NEIGHBOR_KEYS
+            )
+            if unknown_neighbors:
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.neighbors has unknown "
+                    f"fields: {unknown_neighbors}"
+                )
+            neighbors = {}
+            for field in ("before", "after"):
+                if field not in raw_neighbors:
+                    continue
+                raw_count = raw_neighbors[field]
+                if type(raw_count) is not int or raw_count < 0:
+                    raise ProfileContractError(
+                        f"profile.module_context_views.{module}.neighbors.{field} "
+                        "must be a non-negative integer"
+                    )
+                neighbors[field] = raw_count
+            if "include_target" in raw_neighbors:
+                include_target = raw_neighbors["include_target"]
+                if type(include_target) is not bool:
+                    raise ProfileContractError(
+                        f"profile.module_context_views.{module}.neighbors.include_target "
+                        "must be boolean"
+                    )
+                neighbors["include_target"] = include_target
+            view["neighbors"] = neighbors
+        if "limits" in raw_view:
+            raw_limits = raw_view["limits"]
+            if not isinstance(raw_limits, dict):
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.limits must be an object"
+                )
+            unknown_limits = sorted(set(raw_limits) - _MODULE_CONTEXT_LIMIT_KEYS)
+            if unknown_limits:
+                raise ProfileContractError(
+                    f"profile.module_context_views.{module}.limits has unknown fields: "
+                    f"{unknown_limits}"
+                )
+            limits = {}
+            for field in sorted(raw_limits):
+                raw_limit = raw_limits[field]
+                if type(raw_limit) is not int or raw_limit < 0:
+                    raise ProfileContractError(
+                        f"profile.module_context_views.{module}.limits.{field} "
+                        "must be a non-negative integer"
+                    )
+                limits[field] = raw_limit
+            view["limits"] = limits
+        output[module] = view
+    return output
+
+
 def normalize_profile(profile: Mapping[str, object]) -> dict:
     """Normalize a legacy or v2 profile into one deterministic runtime shape."""
 
@@ -860,6 +1004,9 @@ def normalize_profile(profile: Mapping[str, object]) -> dict:
     capabilities = _normalize_capability_declarations(
         raw.get("capabilities"), descriptors, legacy=legacy
     )
+    module_context_views = _normalize_module_context_views(
+        raw.get("module_context_views"), capabilities
+    )
     unsigned_profile = {
         key: value
         for key, value in dict(profile).items()
@@ -878,6 +1025,7 @@ def normalize_profile(profile: Mapping[str, object]) -> dict:
             "assets": assets,
             "capabilities": capabilities,
             "capability_descriptors": custom_descriptors,
+            "module_context_views": module_context_views,
             "source_profile_digest": canonical_digest(unsigned_profile),
         }
     )
@@ -904,8 +1052,7 @@ def resolve_capability_descriptor(
     for key in ("applies_when", "window_rules"):
         if key in config:
             output[key] = deepcopy(config[key])
-    if "identity" in config:
-        output["identity"] = deepcopy(config["identity"])
+    # identity controls runtime business keys; it is not descriptor metadata.
     if "budget" in config:
         output["runtime_budget"] = deepcopy(config["budget"])
     return output
@@ -1191,6 +1338,13 @@ def validate_normalized_profile(value: object) -> dict:
         raise ProfileContractError("normalized profile assets must be an object")
     if not isinstance(value.get("capabilities"), dict):
         raise ProfileContractError("normalized profile capabilities must be an object")
+    normalized_views = _normalize_module_context_views(
+        value.get("module_context_views", {}), value["capabilities"]
+    )
+    if value.get("module_context_views", {}) != normalized_views:
+        raise ProfileContractError(
+            "normalized profile module_context_views is not canonical"
+        )
     source_digest = value.get("source_profile_digest")
     if (
         not isinstance(source_digest, str)

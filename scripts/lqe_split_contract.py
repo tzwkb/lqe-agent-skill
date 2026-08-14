@@ -179,6 +179,7 @@ def state_revision_payload(state: dict) -> dict:
         ),
         "check_scope": deepcopy(state.get("check_scope")),
         "review_policy": get_review_policy(state),
+        "profile_digest": state.get("profile_digest"),
         "capability_resolution_digest": state.get(
             "capability_resolution_digest"
         ),
@@ -186,6 +187,9 @@ def state_revision_payload(state: dict) -> dict:
             "project_asset_snapshot_digest"
         ),
         "context_pipeline": deepcopy(state.get("context_pipeline")),
+        "module_context_views": deepcopy(
+            state.get("module_context_views", {})
+        ),
         "asset_paths": {
             key: _asset_snapshot(state.get(key), key)
             for key in (

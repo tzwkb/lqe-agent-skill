@@ -96,6 +96,8 @@ python3 scripts/run_tests.py
 
 优先使用项目档案；一个参数即可加载语言设置、检查项、确认规则、术语和风格指南。
 
+Profile v2 可用 `module_context_views` 按模块声明 capability、dimension、邻句窗口，以及人物事实、关系和审核案例数量上限。`max_runtime_examples: 0` 表示不提供案例。`off` 不启用 optional view，`shadow` 只写入 `state.shadow_module_context_views` 供审计，`enforce` 才进入正式 worker 输入。shadow typed asset 即使自称 core capability 也不能进入正式 bundle；显式标记 `attributes.runtime_rule: false` 的关系同样会被排除。
+
 新任务初始化前，Agent 必须先询问用户选择审校输出模式，除非当前请求已明确：`optimized` 为降本模式，`full` 为完整模式。选择通过 `--review-mode` 写入 `state.review_policy`；已有 job 直接沿用 state，不中途切换。
 
 ```bash

@@ -335,7 +335,15 @@ class CustomRegistryReadIntegrationTests(unittest.TestCase):
                 "context_pipeline": {"mode": "enforce"},
                 "capability_descriptors": {custom["id"]: custom},
                 "capabilities": {
-                    "context.core@1": {"required": True},
+                    "context.core@1": {
+                        "required": True,
+                        "config": {
+                            "identity": {
+                                "key_columns": ["Key"],
+                                "fallback": "source_coordinate",
+                            }
+                        },
+                    },
                     "source_provenance@1": {"required": True},
                     "context.character@1": {"required": False},
                 },
@@ -377,6 +385,19 @@ class CustomRegistryReadIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(read_result.returncode, 0, read_result.stderr)
             state = json.loads((job / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["normalized_capabilities"]["context.core@1"]["config"][
+                    "identity"
+                ],
+                {
+                    "key_columns": ["Key"],
+                    "fallback": "source_coordinate",
+                },
+            )
+            self.assertNotIn(
+                "identity",
+                state["resolved_context_descriptors"]["context.core@1"],
+            )
             self.assertIn(
                 "context.character@1", state["resolved_context_descriptors"]
             )

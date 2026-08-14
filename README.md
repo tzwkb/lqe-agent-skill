@@ -96,6 +96,8 @@ python3 scripts/run_tests.py
 
 Project profiles are preferred because one option loads language settings, checks, confirmed rules, terminology, and the style guide.
 
+Profile contract v2 can declare `module_context_views` for module-specific capabilities, dimensions, neighbor windows, and entity/relation/example limits. A zero runtime-example limit means no examples are delivered. `off` ignores optional views, `shadow` records them only in `state.shadow_module_context_views`, and `enforce` publishes them as formal worker input. Shadow-bound typed assets cannot enter formal bundles even if their records claim a core capability; relations marked `attributes.runtime_rule: false` are also excluded.
+
 Before initializing a new job, the agent must ask the user to choose a review-output mode unless the current request already specifies it: `optimized` is the cost-saving mode and `full` restores complete suggestion behavior. `--review-mode` stores the choice in `state.review_policy`; an existing job keeps its stored mode.
 
 ```bash

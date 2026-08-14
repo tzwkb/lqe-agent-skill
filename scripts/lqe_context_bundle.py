@@ -72,6 +72,18 @@ FOUNDATION_ASSET_KINDS = frozenset(
 )
 FORMAL_CAPABILITY_EFFECTS = frozenset({"foundation", "enforce"})
 VERIFIED_STATUSES = frozenset({"verified", "source_backed"})
+_ASSET_RECORD_FIELDS = (
+    "entities",
+    "facts",
+    "relations",
+    "review_examples",
+    "context_rules",
+)
+_ASSET_KIND_RECORD_FIELDS = {
+    "entity_registry": frozenset({"entities", "facts", "relations"}),
+    "review_examples": frozenset({"review_examples"}),
+    "context_rules": frozenset({"context_rules"}),
+}
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _MODULE_VIEW_KEYS = frozenset(
     {
@@ -586,12 +598,14 @@ def load_project_context_assets(state: Mapping) -> dict:
             source_ids=source_ids,
             held_out_segment_keys=held_out_keys,
         )
+        record_ids = {field: [] for field in _ASSET_RECORD_FIELDS}
         asset_bindings[asset_id] = {
             "asset_id": asset_id,
             "kind": kind,
             "sha256": actual_digest,
             "document_digest": canonical_digest(validated),
             "capability_ids": enabled_assets[asset_id],
+            "record_ids": record_ids,
         }
         if kind == "entity_registry":
             for entity in validated["entities"]:
@@ -602,6 +616,7 @@ def load_project_context_assets(state: Mapping) -> dict:
                     )
                 entity_record_ids.add(entity_id)
                 _put_unique(entities, entity_id, entity, label="entity id")
+                record_ids["entities"].append(entity_id)
                 for fact in entity["facts"]:
                     fact_id = fact["id"]
                     if fact_id in entity_record_ids:
@@ -621,6 +636,7 @@ def load_project_context_assets(state: Mapping) -> dict:
                         },
                         label="entity fact id",
                     )
+                    record_ids["facts"].append(fact_id)
             for relation in validated["relations"]:
                 relation_id = relation["id"]
                 if relation_id in entity_record_ids:
@@ -631,6 +647,7 @@ def load_project_context_assets(state: Mapping) -> dict:
                 _put_unique(
                     relations, relation_id, relation, label="relation id"
                 )
+                record_ids["relations"].append(relation_id)
         elif kind == "review_examples":
             for example in validated["examples"]:
                 _put_unique(
@@ -639,9 +656,13 @@ def load_project_context_assets(state: Mapping) -> dict:
                     example,
                     label="review example id",
                 )
+                record_ids["review_examples"].append(example["id"])
         else:
             for rule in validated["rules"]:
                 _put_unique(rules, rule["id"], rule, label="context rule id")
+                record_ids["context_rules"].append(rule["id"])
+        for field in record_ids:
+            record_ids[field].sort()
 
     output = {
         "asset_snapshot_digest": snapshot["digest"],
@@ -654,7 +675,7 @@ def load_project_context_assets(state: Mapping) -> dict:
         "context_rules": rules,
     }
     output["loaded_assets_digest"] = canonical_digest(output)
-    return output
+    return validate_loaded_project_context_assets(output)
 
 
 def validate_loaded_project_context_assets(value: object) -> dict:
@@ -688,10 +709,141 @@ def validate_loaded_project_context_assets(value: object) -> dict:
     }:
         if not isinstance(value[field], Mapping):
             raise ContextBundleError(f"loaded project context assets {field} must be an object")
+    indexes = {
+        "entities": value["entities"],
+        "facts": value["facts"],
+        "relations": value["relations"],
+        "review_examples": value["review_examples"],
+        "context_rules": value["context_rules"],
+    }
+    claimed = {field: set() for field in _ASSET_RECORD_FIELDS}
+    for asset_id, binding in value["asset_bindings"].items():
+        if not isinstance(binding, Mapping) or binding.get("asset_id") != asset_id:
+            raise ContextBundleError(
+                f"loaded project context asset binding key mismatch: {asset_id!r}"
+            )
+        capability_ids = binding.get("capability_ids")
+        if capability_ids != _string_list(
+            capability_ids, f"asset_bindings.{asset_id}.capability_ids"
+        ):
+            raise ContextBundleError(
+                f"loaded project context asset {asset_id!r} capabilities are not canonical"
+            )
+        if not capability_ids:
+            raise ContextBundleError(
+                f"loaded project context asset {asset_id!r} has no capability binding"
+            )
+        kind = binding.get("kind")
+        if kind not in _ASSET_KIND_RECORD_FIELDS:
+            raise ContextBundleError(
+                f"loaded project context asset {asset_id!r} has invalid kind"
+            )
+        record_ids = binding.get("record_ids")
+        if not isinstance(record_ids, Mapping) or set(record_ids) != set(
+            _ASSET_RECORD_FIELDS
+        ):
+            raise ContextBundleError(
+                f"loaded project context asset {asset_id!r} record_ids are invalid"
+            )
+        for field in _ASSET_RECORD_FIELDS:
+            ids = _string_list(
+                record_ids[field],
+                f"asset_bindings.{asset_id}.record_ids.{field}",
+            )
+            if ids != record_ids[field]:
+                raise ContextBundleError(
+                    f"loaded project context asset {asset_id!r} record ids are not canonical"
+                )
+            duplicates = claimed[field].intersection(ids)
+            if duplicates:
+                raise ContextBundleError(
+                    f"loaded project context records have multiple owning assets: "
+                    f"{sorted(duplicates)}"
+                )
+            unknown = sorted(set(ids) - set(indexes[field]))
+            if unknown:
+                raise ContextBundleError(
+                    f"loaded project context asset {asset_id!r} claims unknown {field}: "
+                    f"{unknown}"
+                )
+            claimed[field].update(ids)
+            if ids and field not in _ASSET_KIND_RECORD_FIELDS[kind]:
+                raise ContextBundleError(
+                    f"loaded project context asset {asset_id!r} kind {kind!r} "
+                    f"cannot own {field} records"
+                )
+    for field in _ASSET_RECORD_FIELDS:
+        unclaimed = sorted(set(indexes[field]) - claimed[field])
+        if unclaimed:
+            raise ContextBundleError(
+                f"loaded project context {field} records lack an owning asset: {unclaimed}"
+            )
     expected = _digest_without(value, "loaded_assets_digest")
     if value["loaded_assets_digest"] != expected:
         raise ContextBundleError("loaded project context assets digest mismatch")
     return deepcopy(dict(value))
+
+
+def _formal_project_context_assets(
+    assets: Mapping,
+    resolution: Mapping,
+    snapshot: Mapping,
+) -> dict:
+    formal_capabilities = {
+        capability_id
+        for capability_id, item in resolution["enabled"].items()
+        if isinstance(item, Mapping)
+        and item.get("effect") in FORMAL_CAPABILITY_EFFECTS
+    }
+    allowed = {field: set() for field in _ASSET_RECORD_FIELDS}
+    for asset_id, binding in assets["asset_bindings"].items():
+        snapshot_entry = snapshot["assets"].get(asset_id)
+        if (
+            not isinstance(snapshot_entry, Mapping)
+            or snapshot_entry.get("kind") != binding.get("kind")
+        ):
+            raise ContextBundleError(
+                f"loaded asset binding differs from project snapshot: {asset_id}"
+            )
+        capability_ids = set(binding["capability_ids"])
+        for capability_id in capability_ids:
+            item = resolution["enabled"].get(capability_id)
+            if not isinstance(item, Mapping) or item.get("asset") != asset_id:
+                raise ContextBundleError(
+                    f"loaded asset binding differs from capability resolution: "
+                    f"{asset_id}/{capability_id}"
+                )
+        if not capability_ids.intersection(formal_capabilities):
+            continue
+        for field in _ASSET_RECORD_FIELDS:
+            allowed[field].update(binding["record_ids"][field])
+    return {
+        "entities": {
+            key: deepcopy(value)
+            for key, value in assets["entities"].items()
+            if key in allowed["entities"]
+        },
+        "facts": {
+            key: deepcopy(value)
+            for key, value in assets["facts"].items()
+            if key in allowed["facts"]
+        },
+        "relations": {
+            key: deepcopy(value)
+            for key, value in assets["relations"].items()
+            if key in allowed["relations"]
+        },
+        "review_examples": {
+            key: deepcopy(value)
+            for key, value in assets["review_examples"].items()
+            if key in allowed["review_examples"]
+        },
+        "context_rules": {
+            key: deepcopy(value)
+            for key, value in assets["context_rules"].items()
+            if key in allowed["context_rules"]
+        },
+    }
 
 
 def _active_context_registry(state: Mapping) -> dict[str, dict]:
@@ -974,6 +1126,10 @@ def _select_entity_records(
             relation_id
             for relation_id, relation in assets["relations"].items()
             if relation["verification_status"] in VERIFIED_STATUSES
+            and not (
+                isinstance(relation.get("attributes"), Mapping)
+                and relation["attributes"].get("runtime_rule") is False
+            )
             and relation["from"] in requested_set
             and relation["to"] in requested_set
         )[:max_relations]
@@ -1302,14 +1458,17 @@ def build_context_bundle(
         raise ContextBundleError(
             "loaded assets belong to another capability resolution"
         )
+    formal_assets = _formal_project_context_assets(assets, resolution, snapshot)
     if not isinstance(segment, Mapping):
         raise ContextBundleError("segment must be an object")
     module = _nonempty_text(module, "module")
     view = normalize_module_view(state, module, registry, module_view)
     projection = _context_projection(segment, module, registry, view)
-    fact_ids, relation_ids = _select_entity_records(projection, assets, view)
-    example_ids = _select_runtime_examples(projection, assets, view)
-    constraints, _ = _select_constraints(segment, assets, view)
+    fact_ids, relation_ids = _select_entity_records(
+        projection, formal_assets, view
+    )
+    example_ids = _select_runtime_examples(projection, formal_assets, view)
+    constraints, _ = _select_constraints(segment, formal_assets, view)
     identity = _segment_identity(segment)
     segment_revision_digest = _digest(
         segment.get("segment_revision_digest"),

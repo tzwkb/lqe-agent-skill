@@ -12,12 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from lqe_split_contract import state_revision_payload
+from lqe_split_contract import state_fingerprint, state_revision_payload
 from lqe_profile_ingest import build_project_source_manifest
 from lqe_context_bundle import (
     ContextBundleError,
     build_context_bundle_set,
     build_worker_context_manifest,
+    load_project_context_assets,
 )
 
 
@@ -54,12 +55,37 @@ def project_profile(mode: str) -> dict:
             "checks": asset("checks", "checks.json"),
             "rules": asset("confirmed_rules", "confirmed_rules.md"),
             "entities": asset("entity_registry", "entities.json"),
+            "examples_primary": asset(
+                "review_examples", "examples_primary.json"
+            ),
+            "examples_secondary": asset(
+                "review_examples", "examples_secondary.json"
+            ),
             "project_sources": asset(
                 "project_source_manifest",
                 "provenance/project_sources.json",
             ),
         },
         "context_pipeline": {"mode": mode},
+        "module_context_views": {
+            "suggestions": {
+                "capabilities": [
+                    "context.core@1",
+                    "context.dialogue@1",
+                ],
+                "dimensions": ["suggestions"],
+                "limits": {"max_runtime_examples": 2},
+            }
+        },
+        "capability_descriptors": {
+            "assets.review_examples_extra@1": {
+                "schema": "lqe.context-capability-descriptor",
+                "version": 1,
+                "id": "assets.review_examples_extra@1",
+                "fields": {},
+                "module_views": {},
+            }
+        },
         "capabilities": {
             "context.core@1": {
                 "required": True,
@@ -84,6 +110,14 @@ def project_profile(mode: str) -> dict:
             "assets.entity_registry@1": {
                 "required": False,
                 "asset": "entities",
+            },
+            "assets.review_examples@1": {
+                "required": False,
+                "asset": "examples_primary",
+            },
+            "assets.review_examples_extra@1": {
+                "required": False,
+                "asset": "examples_secondary",
             },
             "language_policy.register@1": {
                 "required": False,
@@ -152,6 +186,37 @@ class ContextPipelineModeTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        for filename, example_id in (
+            ("examples_primary.json", "example.core.primary"),
+            ("examples_secondary.json", "example.core.secondary"),
+        ):
+            (project / filename).write_text(
+                json.dumps(
+                    {
+                        "schema": "lqe.review-examples",
+                        "version": 1,
+                        "examples": [
+                            {
+                                "id": example_id,
+                                "dimensions": ["suggestions"],
+                                "source": "原文示例",
+                                "rejected_target": "나쁜 예시",
+                                "preferred_target": "좋은 예시",
+                                "reason": "Reviewed fixture",
+                                "scope": "project",
+                                "review_status": "reviewed",
+                                "authority": {"issuer": "test"},
+                                "uses": ["runtime_reference"],
+                                "content_types": ["dialogue"],
+                                "capabilities": ["context.core@1"],
+                                "provenance": {"source_id": "source.entities"},
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
         coverage_details = {"records": []}
         provenance = project / "provenance"
         provenance.mkdir()
@@ -159,9 +224,32 @@ class ContextPipelineModeTests(unittest.TestCase):
             json.dumps(coverage_details),
             encoding="utf-8",
         )
-        entities_digest = hashlib.sha256(
-            (project / "entities.json").read_bytes()
-        ).hexdigest()
+        generated_assets = [
+            {
+                "asset_id": asset_id,
+                "kind": kind,
+                "path": filename,
+                "sha256": hashlib.sha256(
+                    (project / filename).read_bytes()
+                ).hexdigest(),
+                "derived_from": ["source.entities"],
+                "distribution": "internal_only",
+                "generator": {"name": "test", "version": 1},
+            }
+            for asset_id, kind, filename in (
+                ("entities", "entity_registry", "entities.json"),
+                (
+                    "examples_primary",
+                    "review_examples",
+                    "examples_primary.json",
+                ),
+                (
+                    "examples_secondary",
+                    "review_examples",
+                    "examples_secondary.json",
+                ),
+            )
+        ]
         manifest = build_project_source_manifest(
             project="mode-test",
             manifest_scope="internal",
@@ -176,17 +264,7 @@ class ContextPipelineModeTests(unittest.TestCase):
                     "availability": "external",
                 }
             ],
-            generated_assets=[
-                {
-                    "asset_id": "entities",
-                    "kind": "entity_registry",
-                    "path": "entities.json",
-                    "sha256": entities_digest,
-                    "derived_from": ["source.entities"],
-                    "distribution": "internal_only",
-                    "generator": {"name": "test", "version": 1},
-                }
-            ],
+            generated_assets=generated_assets,
             coverage={
                 "total_nonempty": 0,
                 "converted": 0,
@@ -359,6 +437,22 @@ class ContextPipelineModeTests(unittest.TestCase):
             set(enforce["resolved_context_descriptors"]),
             {"context.core@1", "context.dialogue@1"},
         )
+        declared_view = {
+            "suggestions": {
+                "capabilities": [
+                    "context.core@1",
+                    "context.dialogue@1",
+                ],
+                "dimensions": ["suggestions"],
+                "limits": {"max_runtime_examples": 2},
+            }
+        }
+        self.assertEqual(off["module_context_views"], {})
+        self.assertNotIn("shadow_module_context_views", off)
+        self.assertEqual(shadow["module_context_views"], {})
+        self.assertEqual(shadow["shadow_module_context_views"], declared_view)
+        self.assertEqual(enforce["module_context_views"], declared_view)
+        self.assertNotIn("shadow_module_context_views", enforce)
         self.assertEqual(
             set(shadow["shadow_context_descriptors"]),
             {"context.core@1", "context.dialogue@1"},
@@ -423,8 +517,23 @@ class ContextPipelineModeTests(unittest.TestCase):
         )
         off_payload = state_revision_payload(off)
         shadow_payload = state_revision_payload(shadow)
+        enforce_payload = state_revision_payload(enforce)
         self.assertNotIn("shadow_context", off_payload["segments"][0])
         self.assertNotIn("shadow_context", shadow_payload["segments"][0])
+        self.assertEqual(shadow_payload["module_context_views"], {})
+        self.assertEqual(
+            enforce_payload["module_context_views"], declared_view
+        )
+        self.assertEqual(
+            enforce_payload["profile_digest"], enforce["profile_digest"]
+        )
+        changed_view_state = json.loads(json.dumps(enforce))
+        changed_view_state["module_context_views"]["suggestions"]["limits"][
+            "max_runtime_examples"
+        ] = 1
+        self.assertNotEqual(
+            state_fingerprint(enforce), state_fingerprint(changed_view_state)
+        )
         self.assertNotEqual(
             enforce["segments"][0]["module_review_equivalence_keys"]["accuracy"],
             enforce["segments"][1]["module_review_equivalence_keys"]["accuracy"],
@@ -466,6 +575,41 @@ class ContextPipelineModeTests(unittest.TestCase):
             "entities",
             {item["asset_id"] for item in shadow_manifest["project_assets"]},
         )
+        shadow_loaded = load_project_context_assets(shadow)
+        self.assertEqual(
+            set(shadow_loaded["review_examples"]),
+            {"example.core.primary", "example.core.secondary"},
+        )
+        forced_core_view = {
+            "capabilities": ["context.core@1"],
+            "dimensions": ["suggestions"],
+            "limits": {"max_runtime_examples": 2},
+        }
+        shadow_forced = build_context_bundle_set(
+            shadow,
+            shadow["segments"],
+            "suggestions",
+            loaded_assets=shadow_loaded,
+            module_view=forced_core_view,
+        )
+        self.assertEqual(
+            shadow_forced["shared_context_assets"]["review_examples"], {}
+        )
+        self.assertTrue(
+            all(not item["runtime_example_ids"] for item in shadow_forced["bundles"])
+        )
+        shadow_forced_manifest = build_worker_context_manifest(
+            shadow,
+            "suggestions",
+            shadow_forced,
+            max_worker_bytes=100_000,
+        )
+        self.assertEqual(
+            shadow_forced_manifest["shared_context_assets"]["counts"][
+                "review_examples"
+            ],
+            0,
+        )
         shadow_with_forced_asset_view = json.loads(json.dumps(shadow))
         shadow_with_forced_asset_view["module_context_views"] = {
             "suggestions": {
@@ -482,9 +626,28 @@ class ContextPipelineModeTests(unittest.TestCase):
             "assets.entity_registry@1",
             enforce_bundle["capabilities"]["enabled"],
         )
+        self.assertEqual(
+            set(enforce_bundle["shared_context_assets"]["review_examples"]),
+            {"example.core.primary", "example.core.secondary"},
+        )
+        self.assertTrue(
+            all(
+                set(item["runtime_example_ids"])
+                == {"example.core.primary", "example.core.secondary"}
+                for item in enforce_bundle["bundles"]
+            )
+        )
         self.assertIn(
             "entities",
             {item["asset_id"] for item in enforce_manifest["project_assets"]},
+        )
+        self.assertTrue(
+            {"examples_primary", "examples_secondary"}.issubset(
+                {
+                    item["asset_id"]
+                    for item in enforce_manifest["project_assets"]
+                }
+            )
         )
         self.assertEqual(
             [item["id"] for item in enforce_manifest["language_providers"]],

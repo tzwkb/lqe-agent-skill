@@ -95,6 +95,7 @@ class ProfileCapabilityNegotiationTests(unittest.TestCase):
         self.assertEqual(normalized["profile_contract_version"], 1)
         self.assertTrue(normalized["legacy_adapter"])
         self.assertEqual(normalized["context_pipeline"], {"mode": "off"})
+        self.assertEqual(normalized["module_context_views"], {})
         self.assertEqual(set(normalized["assets"]), {"style_guide", "terminology"})
         self.assertEqual(
             set(resolution["enabled"]),
@@ -105,6 +106,13 @@ class ProfileCapabilityNegotiationTests(unittest.TestCase):
             "not_declared",
         )
         validate_capability_resolution(resolution)
+
+        historical_normalized = deepcopy(normalized)
+        del historical_normalized["module_context_views"]
+        self.assertEqual(
+            resolve_capabilities(historical_normalized)["context_pipeline_mode"],
+            "off",
+        )
 
     def test_v2_requires_foundations_and_core_asset_kinds(self):
         profile = v2_profile()
@@ -151,6 +159,57 @@ class ProfileCapabilityNegotiationTests(unittest.TestCase):
         self.assertEqual(shadow_result["enabled"]["context.ui@1"]["effect"], "shadow")
         self.assertEqual(enforce_result["enabled"]["context.ui@1"]["effect"], "enforce")
         self.assertEqual(len({off_result["digest"], shadow_result["digest"], enforce_result["digest"]}), 3)
+
+    def test_module_context_views_are_normalized_and_profile_bound(self):
+        profile = v2_profile()
+        profile["capabilities"]["context.dialogue@1"] = {"required": False}
+        profile["module_context_views"] = {
+            "suggestions": {
+                "capabilities": ["context.dialogue@1", "context.core@1"],
+                "dimensions": ["naturalness", "accuracy"],
+                "constraint_kinds": [],
+                "neighbors": {"after": 1, "before": 2},
+                "limits": {"max_runtime_examples": 3},
+            }
+        }
+
+        normalized = normalize_profile(profile)
+
+        self.assertEqual(
+            normalized["module_context_views"],
+            {
+                "suggestions": {
+                    "capabilities": ["context.core@1", "context.dialogue@1"],
+                    "dimensions": ["accuracy", "naturalness"],
+                    "constraint_kinds": [],
+                    "neighbors": {"before": 2, "after": 1},
+                    "limits": {"max_runtime_examples": 3},
+                }
+            },
+        )
+        changed = deepcopy(profile)
+        changed["module_context_views"]["suggestions"]["limits"][
+            "max_runtime_examples"
+        ] = 4
+        self.assertNotEqual(
+            normalized["source_profile_digest"],
+            normalize_profile(changed)["source_profile_digest"],
+        )
+
+        invalid = deepcopy(profile)
+        invalid["module_context_views"]["suggestions"]["capabilities"] = [
+            "context.core@1",
+            "context.ui@1",
+        ]
+        with self.assertRaisesRegex(ProfileContractError, "undeclared capabilities"):
+            normalize_profile(invalid)
+
+        invalid = deepcopy(profile)
+        invalid["module_context_views"]["suggestions"]["limits"][
+            "max_runtime_examples"
+        ] = -1
+        with self.assertRaisesRegex(ProfileContractError, "non-negative integer"):
+            normalize_profile(invalid)
 
     def test_asset_backed_capability_uses_only_explicit_snapshot_status(self):
         profile = v2_profile()

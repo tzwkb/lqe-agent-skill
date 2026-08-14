@@ -1265,6 +1265,19 @@ def _registry_for_profile(
     return _foundation_context_registry()
 
 
+def _module_context_views_for_profile(prof: dict | None) -> tuple[dict, dict | None]:
+    normalized = prof.get("_normalized_profile") if prof else None
+    if not isinstance(normalized, dict):
+        return {}, None
+    views = deepcopy(normalized.get("module_context_views", {}))
+    mode = normalized.get("context_pipeline", {}).get("mode", "off")
+    if mode == "enforce":
+        return views, None
+    if mode == "shadow":
+        return {}, views
+    return {}, None
+
+
 def _legacy_segment_context(
     segment: dict,
     registry: dict,
@@ -1693,6 +1706,11 @@ def _prepare_read_assets(
             asset_statuses=asset_statuses(asset_inspection["snapshot"]),
             provider_registry=trusted_provider_registry(),
         )
+    module_context_views, shadow_module_context_views = (
+        _module_context_views_for_profile(prof)
+        if prof
+        else ({}, None)
+    )
     project_asset_snapshot = (
         deepcopy(asset_inspection.get("snapshot"))
         if isinstance(asset_inspection, dict)
@@ -1775,6 +1793,12 @@ def _prepare_read_assets(
         ),
         "context_pipeline": deepcopy(
             (normalized_profile or {}).get("context_pipeline", {"mode": "off"})
+        ),
+        "module_context_views": module_context_views,
+        **(
+            {"shadow_module_context_views": shadow_module_context_views}
+            if shadow_module_context_views is not None
+            else {}
         ),
         "normalized_capabilities": deepcopy(
             (normalized_profile or {}).get("capabilities", {})

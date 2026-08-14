@@ -851,6 +851,43 @@ class ContextBundleSelectionTests(ContextBundleFixture):
             "entity.operator",
         )
 
+    def test_relation_runtime_rule_false_is_never_worker_visible(self):
+        baseline = build_context_bundle(
+            self.state, self.current, "accuracy", module_view=self.view
+        )
+        self.assertEqual(
+            baseline["relation_ids"],
+            ["relation.operator.supervisor.verified"],
+        )
+
+        document = json.loads(self.files["entities"].read_text(encoding="utf-8"))
+        verified = next(
+            item
+            for item in document["relations"]
+            if item["id"] == "relation.operator.supervisor.verified"
+        )
+        verified["attributes"]["runtime_rule"] = False
+        document["relations"].append(
+            relation(
+                "relation.operator.supervisor.conflict",
+                "entity.operator",
+                "entity.supervisor",
+                "conflict",
+            )
+        )
+        self.files["entities"].write_text(
+            json.dumps(document, ensure_ascii=False), encoding="utf-8"
+        )
+        self._rebind_asset("entities")
+
+        bundle = build_context_bundle(
+            self.state, self.current, "accuracy", module_view=self.view
+        )
+
+        self.assertEqual(bundle["relation_ids"], [])
+        self.assertNotIn("candidate", repr(bundle))
+        self.assertNotIn("conflict", repr(bundle["relation_ids"]))
+
     def test_example_matching_never_uses_source_similarity(self):
         document = json.loads(self.files["examples"].read_text(encoding="utf-8"))
         document["examples"][1]["source"] = self.current["source"]
