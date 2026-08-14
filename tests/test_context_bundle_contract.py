@@ -17,6 +17,7 @@ from lqe_context_bundle import (
     WorkerContextBudgetError,
     build_context_bundle,
     build_context_bundle_set,
+    build_selected_context_evidence_index,
     build_worker_context_manifest,
     calculate_worker_input_bytes,
     canonical_digest,
@@ -26,6 +27,8 @@ from lqe_context_bundle import (
     validate_loaded_project_context_assets,
     validate_shared_context_assets,
     validate_worker_context_manifest,
+    validate_selected_context_evidence_index,
+    verify_worker_context_manifest_resources,
 )
 from lqe_language_policies import trusted_provider_registry
 from lqe_profile_ingest import build_project_source_manifest, source_digest
@@ -710,23 +713,47 @@ class BoundAssetLoadingTests(ContextBundleFixture):
             },
         )
 
-    def test_runtime_example_for_current_segment_is_rejected_as_held_out_leak(self):
+    def test_segment_runtime_example_is_bound_to_the_exact_current_key(self):
         document = json.loads(self.files["examples"].read_text(encoding="utf-8"))
-        leaking = example(
-            "example.leak",
+        exact = example(
+            "example.segment.current",
             content_types=["dialogue"],
             capabilities=["context.dialogue@1"],
             scope="segment",
         )
-        leaking["segment_key"] = "current"
-        document["examples"].append(leaking)
+        exact["segment_key"] = "current"
+        other = example(
+            "example.segment.other",
+            content_types=["dialogue"],
+            capabilities=["context.dialogue@1"],
+            scope="segment",
+        )
+        other["segment_key"] = "neighbor-left"
+        document["examples"].extend([exact, other])
         self.files["examples"].write_text(
             json.dumps(document, ensure_ascii=False), encoding="utf-8"
         )
         self._rebind_asset("examples")
 
-        with self.assertRaisesRegex(ContextBundleError, "leaks a held-out segment"):
-            load_project_context_assets(self.state)
+        loaded = load_project_context_assets(self.state)
+        bundle = build_context_bundle(
+            self.state,
+            self.current,
+            "accuracy",
+            loaded_assets=loaded,
+            module_view=self.view,
+        )
+
+        self.assertIn("example.segment.current", bundle["runtime_example_ids"])
+        self.assertNotIn("example.segment.other", bundle["runtime_example_ids"])
+        self.assertEqual(
+            bundle["runtime_example_selection"][0]["example_id"],
+            "example.segment.current",
+        )
+        self.assertEqual(
+            bundle["runtime_example_selection"][0]["selection_reason"],
+            "exact_segment_key",
+        )
 
     def test_entity_provenance_must_reference_bound_project_source_manifest(self):
         document = json.loads(self.files["entities"].read_text(encoding="utf-8"))
@@ -1224,10 +1251,15 @@ class BundleSetAndManifestTests(ContextBundleFixture):
             manifest["instructions"]["module"]["sha256"],
             hashlib.sha256(self.files["module"].read_bytes()).hexdigest(),
         )
+        self.assertIsNone(manifest["instructions"]["suggestions"])
         self.assertEqual(manifest["budget"]["status"], "within_budget")
         self.assertGreater(manifest["budget"]["measured_bytes"], 0)
         self.assertEqual(
             manifest["language_providers"][0]["id"], "ko.register"
+        )
+        self.assertEqual(
+            manifest["instructions"]["common"]["locator"]["kind"],
+            "embedded_text",
         )
 
         with self.assertRaisesRegex(WorkerContextBudgetError, "split the batch"):
@@ -1241,6 +1273,159 @@ class BundleSetAndManifestTests(ContextBundleFixture):
                 module_instructions_path=self.files["module"],
                 suggestion_instructions_path=self.files["suggestions"],
             )
+
+    def test_worker_resource_locators_are_safe_resolvable_and_budget_bound(self):
+        bundle_set = build_context_bundle_set(
+            self.state,
+            [self.current],
+            "accuracy",
+            module_view=self.view,
+        )
+        manifest = build_worker_context_manifest(
+            self.state,
+            "accuracy",
+            bundle_set,
+            max_worker_bytes=1_000_000,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["module"],
+            suggestion_instructions_path=self.files["suggestions"],
+            job_root=self.root,
+        )
+        documents = [
+            manifest["language_notes"],
+            *manifest["worker_documents"],
+            *(
+                item
+                for item in manifest["instructions"].values()
+                if item is not None
+            ),
+        ]
+        self.assertTrue(all(item is not None for item in documents))
+        self.assertEqual(
+            {item["locator"]["kind"] for item in documents},
+            {"job_relative"},
+        )
+        self.assertEqual(
+            verify_worker_context_manifest_resources(
+                manifest,
+                job_root=self.root,
+            ),
+            manifest,
+        )
+        self.assertEqual(
+            manifest["budget"]["measured_bytes"],
+            sum(manifest["budget"]["components"].values()),
+        )
+        self.assertTrue(
+            all("locator" not in item for item in manifest["source_manifests"])
+        )
+        self.assertTrue(
+            all(item["projection"] for item in manifest["source_manifests"])
+        )
+
+        escaped = deepcopy(manifest)
+        escaped["instructions"]["common"]["locator"]["path"] = "../common.md"
+        escaped["worker_context_manifest_digest"] = canonical_digest(
+            {
+                key: value
+                for key, value in escaped.items()
+                if key != "worker_context_manifest_digest"
+            }
+        )
+        with self.assertRaisesRegex(ContextBundleError, "canonical relative path"):
+            validate_worker_context_manifest(escaped)
+
+        self.files["common"].write_text("Changed instructions", encoding="utf-8")
+        with self.assertRaisesRegex(
+            ContextBundleError,
+            "(byte count|digest) mismatch",
+        ):
+            verify_worker_context_manifest_resources(
+                manifest,
+                job_root=self.root,
+            )
+
+    def test_suggestion_instructions_are_delivered_only_to_suggestion_workers(self):
+        checker_bundle_set = build_context_bundle_set(
+            self.state,
+            [self.current],
+            "accuracy",
+            module_view=self.view,
+        )
+        checker = build_worker_context_manifest(
+            self.state,
+            "accuracy",
+            checker_bundle_set,
+            max_worker_bytes=1_000_000,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["module"],
+            suggestion_instructions_path=self.files["suggestions"],
+        )
+        self.assertIsNone(checker["instructions"]["suggestions"])
+
+        suggestion_bundle_set = build_context_bundle_set(
+            self.state,
+            [self.current],
+            "suggestions",
+            module_view=self.view,
+        )
+        suggestion = build_worker_context_manifest(
+            self.state,
+            "suggestions",
+            suggestion_bundle_set,
+            max_worker_bytes=1_000_000,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["suggestions"],
+            suggestion_instructions_path=self.files["suggestions"],
+        )
+        self.assertEqual(
+            suggestion["instructions"]["suggestions"]["sha256"],
+            hashlib.sha256(self.files["suggestions"].read_bytes()).hexdigest(),
+        )
+
+    def test_selected_evidence_index_records_actual_module_selection(self):
+        bundle_set = build_context_bundle_set(
+            self.state,
+            [self.current],
+            "accuracy",
+            module_view=self.view,
+        )
+        index = build_selected_context_evidence_index(
+            self.state,
+            split_fingerprint="split-fixture",
+            split_manifest_digest="f" * 64,
+            modules=["grammar", "accuracy"],
+            context_bundle_sets=[bundle_set],
+        )
+        self.assertEqual(validate_selected_context_evidence_index(index), index)
+        self.assertEqual(index["modules"], ["accuracy", "grammar"])
+        self.assertEqual(len(index["entries"]), 1)
+        entry = index["entries"][0]
+        self.assertEqual(entry["module"], "accuracy")
+        self.assertEqual(
+            entry["context_bundle_digest"],
+            bundle_set["bundles"][0]["context_bundle_digest"],
+        )
+        self.assertEqual(
+            entry["entity_fact_ids"],
+            bundle_set["bundles"][0]["entity_fact_ids"],
+        )
+        self.assertEqual(
+            entry["runtime_example_ids"],
+            bundle_set["bundles"][0]["runtime_example_ids"],
+        )
+
+        tampered = deepcopy(index)
+        tampered["entries"][0]["entity_fact_ids"] = []
+        tampered["index_digest"] = canonical_digest(
+            {
+                key: value
+                for key, value in tampered.items()
+                if key != "index_digest"
+            }
+        )
+        with self.assertRaisesRegex(ContextBundleError, "entry digest mismatch"):
+            validate_selected_context_evidence_index(tampered)
 
     def test_budget_helpers_measure_utf8_and_never_truncate(self):
         components = ["中文", {"b": 2, "a": 1}, b"raw"]

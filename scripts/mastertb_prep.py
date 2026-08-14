@@ -217,13 +217,18 @@ python scripts/lqe_review.py prepare --job <JOB>
  "worker_packet_basis_digest": "<packet>",
  "context_bundle_set_digest": "<packet>",
  "worker_context_manifest_digest": "<packet>",
+ "selected_evidence_index_path": "<packet>",
+ "selected_evidence_index_digest": "<packet>",
+ "worker_receipt": {"worker_id": "<actual-checker-worker>",
+                    "run_id": "<unique-run>"},
  "reviewed_ids": [123],
  "findings": [{"id": 123, "issues": [{"category": "Mistranslation",
    "severity": "Major", "comment": "说明问题",
    "needs_confirmation": true, "edit": null}]}]}
 ```
 
-不得输出 `corrected` 或 `review_provenance`。草稿完成后使用：
+不得输出 `corrected` 或 `review_provenance`。`worker_receipt` 必须填写实际
+checker worker 身份和本次执行的唯一 run id。草稿完成后使用：
 
 ```bash
 python scripts/lqe_review.py publish --job <JOB> --chunk <NN> \

@@ -3,19 +3,26 @@
   "$id": "lqe.reference-suggestion-generation-draft.v5",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "version", "packet_digest", "worker_context_manifest_digest", "selection", "reviewed_ids", "entries", "abstained_ids"],
+  "required": ["schema", "version", "packet_digest", "worker_context_manifest_digest", "worker_receipt", "selection", "reviewed_ids", "entries", "abstained_ids", "abstention_reasons"],
   "properties": {
     "schema": {"const": "lqe.reference-suggestion-generation-draft"},
     "version": {"const": 5},
     "packet_digest": {"$ref": "#/$defs/digest"},
     "worker_context_manifest_digest": {"$ref": "#/$defs/digest"},
+    "selected_evidence_index_digest": {"$ref": "#/$defs/digest", "description": "Required by the publisher when the packet binds a selected evidence index; must copy packet.selected_evidence_index.digest."},
+    "worker_receipt": {"$ref": "#/$defs/worker_receipt"},
     "selection": {"type": "object"},
     "reviewed_ids": {"type": "array", "items": {"type": "integer"}},
     "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
-    "abstained_ids": {"type": "array", "items": {"type": "integer"}}
+    "abstained_ids": {"type": "array", "items": {"type": "integer"}},
+    "abstention_reasons": {"type": "array", "items": {"$ref": "#/$defs/abstention_reason"}}
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "entry": {"type": "object", "additionalProperties": false, "required": ["id", "reference_target"], "properties": {"id": {"type": "integer"}, "reference_target": {"type": "string"}}}
+    "worker_receipt": {"type": "object", "additionalProperties": false, "required": ["worker_id", "run_id"], "properties": {"worker_id": {"type": "string", "minLength": 1}, "run_id": {"type": "string", "minLength": 1}}},
+    "source_semantics": {"type": "object", "additionalProperties": false, "required": ["subjects", "actions", "objects", "negation", "polarity", "modality", "speech_act", "text_function", "intensity", "omitted_source_elements", "unsupported_additions"], "properties": {"subjects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "actions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "objects": {"type": "array", "items": {"type": "string", "minLength": 1}}, "negation": {"type": "object", "additionalProperties": false, "required": ["present", "scope"], "properties": {"present": {"type": "boolean"}, "scope": {"type": ["string", "null"]}}}, "polarity": {"type": "string", "minLength": 1}, "modality": {"type": "array", "items": {"type": "string", "minLength": 1}}, "speech_act": {"type": "string", "minLength": 1}, "text_function": {"type": "string", "minLength": 1}, "intensity": {"type": "string", "minLength": 1}, "omitted_source_elements": {"type": "array", "items": {"type": "string", "minLength": 1}}, "unsupported_additions": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
+    "tone_decision": {"type": "object", "additionalProperties": false, "required": ["register", "politeness", "depends_on_dialogue_context", "evidence", "uncertainties"], "properties": {"register": {"type": "string", "minLength": 1}, "politeness": {"type": "string", "minLength": 1}, "depends_on_dialogue_context": {"type": "boolean"}, "evidence": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": {"type": {"type": "string", "minLength": 1}, "value": {"type": "string", "minLength": 1}}}}, "uncertainties": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
+    "entry": {"type": "object", "additionalProperties": false, "required": ["id", "reference_target", "source_semantics", "tone_decision"], "properties": {"id": {"type": "integer"}, "reference_target": {"type": "string"}, "source_semantics": {"$ref": "#/$defs/source_semantics"}, "tone_decision": {"$ref": "#/$defs/tone_decision"}}},
+    "abstention_reason": {"type": "object", "additionalProperties": false, "required": ["id", "reason_codes", "evidence"], "properties": {"id": {"type": "integer"}, "reason_codes": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "evidence": {"type": "string", "minLength": 1}}}
   }
 }

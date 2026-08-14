@@ -138,6 +138,10 @@ from lqe_profile_ingest import (
     validate_context_rules,
 )
 from lqe_shadow import build_shadow_context_artifact
+from lqe_context_overrides import (
+    build_context_gap_report,
+    load_and_apply_job_context_overrides,
+)
 
 
 def _validate_scope_or_exit(
@@ -1221,6 +1225,9 @@ def _segment_revision(segment: dict, state_context: dict) -> str:
         "project_asset_snapshot_digest": state_context.get(
             "project_asset_snapshot_digest"
         ),
+        "context_overrides_fingerprint": state_context.get(
+            "context_overrides_fingerprint"
+        ),
     }
     return source_digest(
         json.dumps(
@@ -1481,6 +1488,65 @@ def _apply_runtime_project_context(
                 )
         common["context_rules_digest"] = input_guard_digest(rules)
     return segments
+
+
+def _apply_explicit_context_overrides(
+    args,
+    segments: list[dict],
+    common: dict,
+    registry: dict,
+    *,
+    shadow_registry: dict | None,
+    staging_dir: Path,
+    job_dir: Path,
+    staged_project_asset_paths: dict,
+) -> tuple[list[dict], dict | None, dict | None, tuple[Path, str] | None]:
+    source_path = getattr(args, "context_overrides", None)
+    if not source_path:
+        return segments, None, None, None
+    result = load_and_apply_job_context_overrides(
+        source_path,
+        segments=segments,
+        registry=registry,
+        capability_resolution_digest=common.get("capability_resolution_digest"),
+    )
+    segments = result["segments"]
+    published_sidecar = job_dir / "context_overrides.json"
+    staged_sidecar = staging_dir / published_sidecar.name
+    staged_sidecar.write_text(
+        json.dumps(result["document"], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    audit = deepcopy(result["audit"])
+    audit["path"] = str(published_sidecar)
+    report_state = {
+        **common,
+        "job_runtime_contract_version": JOB_RUNTIME_CONTRACT_VERSION,
+        "resolved_context_descriptors": registry,
+        "shadow_context_descriptors": shadow_registry,
+        "project_asset_paths": staged_project_asset_paths,
+        "segments": segments,
+    }
+    gap_report = build_context_gap_report(report_state)
+    published_gap_report = job_dir / "context_gap_report.json"
+    staged_gap_report = staging_dir / published_gap_report.name
+    staged_gap_report.write_text(
+        json.dumps(gap_report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    common.update(
+        {
+            "context_overrides": audit,
+            "context_overrides_path": str(published_sidecar),
+            "context_overrides_digest": audit["document_digest"],
+            "context_overrides_fingerprint": audit["fingerprint"],
+            "context_runtime_fingerprint": audit["fingerprint"],
+            "context_gap_report_path": str(published_gap_report),
+            "context_gap_report_digest": gap_report["report_digest"],
+        }
+    )
+    guard = (Path(result["source_path"]), audit["source_file_sha256"])
+    return segments, audit, gap_report, guard
 
 
 def _extract_text_type_marker(
@@ -2129,6 +2195,21 @@ def _read_sdlxliff_job(
             context_registry,
             runtime_asset_paths=staged_project_asset_paths,
         )
+        (
+            result.segments,
+            context_overrides_audit,
+            context_gap_report,
+            context_overrides_guard,
+        ) = _apply_explicit_context_overrides(
+            args,
+            result.segments,
+            common,
+            context_registry,
+            shadow_registry=shadow_registry,
+            staging_dir=staging_dir,
+            job_dir=job_dir,
+            staged_project_asset_paths=staged_project_asset_paths,
+        )
         shadow_context_artifact = None
         if shadow_registry is not None:
             shadow_context_artifact = build_shadow_context_artifact(
@@ -2207,12 +2288,27 @@ def _read_sdlxliff_job(
         }
         state["input_guard"] = input_guard_summary(result.segments)
         state["review_wordcount"] = state["wordcount"]
+        if context_overrides_audit is not None:
+            result.manifest["context_overrides"] = deepcopy(
+                context_overrides_audit
+            )
+            result.manifest["context_gap_report"] = {
+                "path": common["context_gap_report_path"],
+                "digest": context_gap_report["report_digest"],
+                "summary": deepcopy(context_gap_report["summary"]),
+            }
         staged_assets = {
             destination: source
             for source, destination in _staged_asset_replacements(
                 staging_dir, job_dir
             )
         }
+        if context_overrides_guard is not None:
+            override_path, expected_digest = context_overrides_guard
+            if file_sha256(override_path) != expected_digest:
+                raise ValueError(
+                    f"context overrides changed while input was being read: {override_path}"
+                )
         _publish_sdlxliff_job(
             state_path,
             manifest=result.manifest,
@@ -2259,6 +2355,8 @@ def _cmd_read_locked(args):
         "capability_resolution.json",
         "project_asset_snapshot.json",
         "tabular_source_manifest.json",
+        "context_overrides.json",
+        "context_gap_report.json",
     }
     if out_path.name.casefold() in generated_asset_names:
         print(
@@ -2332,6 +2430,8 @@ def _cmd_read_locked(args):
         protected_inputs["--style-guide"] = Path(args.style_guide)
     if args.terminology:
         protected_inputs["--terminology"] = Path(args.terminology)
+    if getattr(args, "context_overrides", None):
+        protected_inputs["--context-overrides"] = Path(args.context_overrides)
     planned_outputs = {
         "state": out_path,
         "scope": scope_path,
@@ -2343,6 +2443,13 @@ def _cmd_read_locked(args):
         "capability resolution": job_dir / "capability_resolution.json",
         "project asset snapshot": job_dir / "project_asset_snapshot.json",
     }
+    if getattr(args, "context_overrides", None):
+        planned_outputs.update(
+            {
+                "context overrides copy": job_dir / "context_overrides.json",
+                "context gap report": job_dir / "context_gap_report.json",
+            }
+        )
     if input_format == "tabular":
         planned_outputs["tabular source manifest"] = (
             job_dir / "tabular_source_manifest.json"
@@ -2651,6 +2758,21 @@ def _cmd_read_locked(args):
                 registry,
                 runtime_asset_paths=staged_project_asset_paths,
             )
+            (
+                segments,
+                context_overrides_audit,
+                context_gap_report,
+                context_overrides_guard,
+            ) = _apply_explicit_context_overrides(
+                args,
+                segments,
+                common,
+                registry,
+                shadow_registry=shadow_registry,
+                staging_dir=staging_dir,
+                job_dir=job_dir,
+                staged_project_asset_paths=staged_project_asset_paths,
+            )
 
             for segment in segments:
                 segment["segment_revision_digest"] = _segment_revision(
@@ -2740,6 +2862,22 @@ def _cmd_read_locked(args):
                         if pivot_guard is not None
                         else {}
                     ),
+                    **(
+                        {
+                            "context_overrides": deepcopy(
+                                context_overrides_audit
+                            ),
+                            "context_gap_report": {
+                                "path": common["context_gap_report_path"],
+                                "digest": context_gap_report["report_digest"],
+                                "summary": deepcopy(
+                                    context_gap_report["summary"]
+                                ),
+                            },
+                        }
+                        if context_overrides_audit is not None
+                        else {}
+                    ),
                 }
             )
             staged_manifest.write_text(
@@ -2815,6 +2953,13 @@ def _cmd_read_locked(args):
                 raise ValueError(
                     f"tabular input changed while it was being read: {input_path}"
                 )
+            if context_overrides_guard is not None:
+                override_path, expected_digest = context_overrides_guard
+                if file_sha256(override_path) != expected_digest:
+                    raise ValueError(
+                        "context overrides changed while input was being read: "
+                        f"{override_path}"
+                    )
             publish_replacement_transaction(
                 [
                     *sorted(asset_replacements, key=lambda item: str(item[1])),
@@ -3210,6 +3355,11 @@ def cmd_reread(args):
             if args.profile_overlay
             else None
         ),
+        "context_overrides": (
+            str(Path(args.context_overrides).resolve())
+            if args.context_overrides
+            else None
+        ),
     }
     print(json.dumps(plan, ensure_ascii=False, sort_keys=True))
 
@@ -3241,6 +3391,7 @@ def cmd_reread(args):
             protect_exact_tm=format_options.get("protect_exact_tm", False),
             project=project,
             profile_overlay=args.profile_overlay,
+            context_overrides=args.context_overrides,
             sheet=format_options.get("sheet"),
             source_col=format_options.get("source_col"),
             target_col=format_options.get("target_col"),
@@ -6371,6 +6522,15 @@ def main():
     r.add_argument("--project", default=None, help="项目档案：projects/<名>/profile.json 或目录/文件路径；提供 SG/术语/词数基准/checks/confirmed_rules 默认值，显式参数优先")
     r.add_argument("--profile-overlay", default=None, dest="profile_overlay",
                    help="内部 profile overlay JSON；不能修改项目身份或语言")
+    r.add_argument(
+        "--context-overrides",
+        default=None,
+        dest="context_overrides",
+        help=(
+            "经人工或授权来源核实的 job 级上下文 sidecar；只允许正式 "
+            "foundation/enforce capability 字段，整批校验后原子发布"
+        ),
+    )
     r.add_argument("--sheet", default=None,
                    help="表格输入的主工作表；CSV/TSV 不适用")
     r.add_argument("--source-col", default=None, dest="source_col", help="列名或列索引（0-based，配合 --no-header）；表格输入必填")
@@ -6431,6 +6591,7 @@ def main():
     rr.add_argument("--input", required=True)
     rr.add_argument("--job", required=True)
     rr.add_argument("--profile-overlay", default=None, dest="profile_overlay")
+    rr.add_argument("--context-overrides", default=None, dest="context_overrides")
 
     af = sub.add_parser("apply-fixes")
     af.add_argument("--state",     required=True)

@@ -1,8 +1,17 @@
 # 报告专用参考建议候选
 
-该 worker 只生成候选完整译文，不修改问题清单，也不生成或覆盖 `corrected`。候选不会直接进入报告；模型生成的整句建议必须通过独立 verifier。
+该 worker 只生成完整参考译文，不修改问题清单，不写 `corrected`。模型生成的整句建议必须通过独立 verifier；发布后的 route 固定为 `independent_verifier`。
 
-输入为 `reference_suggestions.packet.json`，schema 固定为 `lqe.reference-suggestion-generation-packet` v5。先读取 `review_policy`，审阅 `segments` 中的全部 ID。`excluded_segments` 已由 publisher 硬拒绝，不得提交这些 ID。
+输入是 `lqe.reference-suggestion-generation-packet` v5。单批时读取 `reference_suggestions.packet.json`；若根 packet 带 `batch_plan`，根 packet 只供本地汇总，每个新 worker 只读取计划列出的一个 `packet.json`，并把草稿写到该批 `draft_path`。不得合并、遗漏或截断批次。
+
+开始前必须读取 packet 中 `instructions.worker_context` 指向的：
+
+- `worker_manifest.json`；
+- `bundle_set.json`；
+- `content_index.json` 中每个 `job_relative_path`，以及每个 `embedded_text`；
+- manifest 列出的语言说明、SG、背景、确认规则，以及仅供输入完整性审计的 compact source-manifest projection。
+
+对于带 `selected_evidence_index` 的正式任务，每个 `segments[].checker_selected_evidence.strict_union` 是该句所有实际 checker 已选择证据的唯一正式并集，包含逐模块的句段上下文、人物事实、关系、运行时示例、已解析约束和邻句。SG、背景、确认规则和语言说明仍须完整读取，但不能据此为当前句重新检索、扩大或替换正式证据；完整 source manifest 不向语义 worker 暴露。`context_view_basis.merged_view` 只保留审计依据，suggestion bundle 本身是零动态证据的 projection。索引 path/digest 用于发布器审计，worker 读取 packet 内嵌的逐句并集，不读取完整索引。缺少 checker 已选证据的句子由 publisher 硬拒绝，worker 不得自行补齐。
 
 草稿格式：
 
@@ -12,45 +21,88 @@
   "version": 5,
   "packet_digest": "<packet.packet_digest>",
   "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
+  "selected_evidence_index_digest": "<packet.selected_evidence_index.digest>",
+  "worker_receipt": {
+    "worker_id": "<本生成 worker 的稳定非空 ID>",
+    "run_id": "<本次运行的稳定非空 ID>"
+  },
   "selection": {
     "categories": [],
     "severities": ["Critical", "Major"],
     "only_missing": false
   },
-  "reviewed_ids": [0, 1, 2],
+  "reviewed_ids": [0, 1],
   "entries": [
-    {"id": 1, "reference_target": "完整的参考译文"}
+    {
+      "id": 0,
+      "reference_target": "完整参考译文",
+      "source_semantics": {
+        "subjects": ["speaker"],
+        "actions": ["orders addressee to follow"],
+        "objects": ["addressee", "home"],
+        "negation": {"present": false, "scope": null},
+        "polarity": "affirmative",
+        "modality": ["imperative"],
+        "speech_act": "command",
+        "text_function": "direct dialogue",
+        "intensity": "strong",
+        "omitted_source_elements": [],
+        "unsupported_additions": []
+      },
+      "tone_decision": {
+        "register": "plain and forceful",
+        "politeness": "non-honorific",
+        "depends_on_dialogue_context": true,
+        "evidence": [
+          {"type": "source_form", "value": "imperative and exclamation"},
+          {"type": "context", "value": "speaker/addressee evidence in bundle"}
+        ],
+        "uncertainties": []
+      }
+    }
   ],
-  "abstained_ids": [0, 2]
+  "abstained_ids": [1],
+  "abstention_reasons": [
+    {
+      "id": 1,
+      "reason_codes": ["SOURCE_INTENT_UNCERTAIN"],
+      "evidence": "The source/context evidence does not establish one reliable intent."
+    }
+  ]
 }
 ```
 
 规则：
 
-- `reviewed_ids` 和 `selection` 必须原样复制 packet。
-- 开始前读取 `suggestion_context/worker_manifest.json`、其列出的全部资料和 `bundle_set.json`；草稿必须原样复制 `worker_context_manifest_digest`。
-- `entries.id ∪ abstained_ids` 必须恰好覆盖 `packet.segments.id`，互斥、无重复。
-- `reference_target` 是完整译文，不是说明、选项或局部片段。
-- 从 source 重新提取主体、动作、对象、否定、条件、情态和文本功能后再生成完整译文；不得沿用当前 target 作为语义骨架。当前 target 只用于保留变量、标签、换行、保护文本和已验证的局部修改。
-- 生成后必须对 source/candidate 再做一次 Mistranslation、Omission、Addition 与已解析约束核对。
-- 必须处理 `known_issues` 的完整并集，不得只处理 `trigger_issue_ids`。
-- 如果存在 `validated_target`，以它为已验证局部修改基础，避免恢复已修正问题。
-- 变量、标签、换行及 `generation_constraints.protected_texts` 的数量和顺序必须保留。
-- 上下文不足、多种合理方案或无法可靠改写时写入 `abstained_ids`。
-- 已有 `validated_target` 的安全局部修改可写入 `abstained_ids`；publisher 会从 canonical 值机械构造 `deterministic_accept`，不要求 worker 重复生成。
-- 不得添加 route、verdict、status、comment、corrected 或审校结论。
-- 术语模块留下 `needs_confirmation: true` 的 Terminology、Inconsistency 或 Company style 已被 publisher 标成 `hard_reject`；不得通过其他类别、近似术语或自选译名绕过。
-- 例外只有术语模块明确写成 `resolution_status: reference_allowed`：这表示术语表不能强制当前句，但不阻止按 source 正常翻译；候选仍必须经过独立 verifier。`non_authorizing_evidence` 只禁止把近似/不同源词当成强制替换证据。
+- `reviewed_ids`、`selection`、`packet_digest`、`worker_context_manifest_digest` 和 `selected_evidence_index_digest` 原样复制；`entries.id ∪ abstained_ids` 必须完整覆盖 `packet.segments.id`。
+- `abstention_reasons` 必须与 `abstained_ids` 同序、一一对应；每项写非空 reason code 和证据。源意无法确定时必须 abstain，并明确记录原因。
+- `worker_receipt` 必填。`worker_id` 和 `run_id` 各自都不得与 `packet.checker_worker_receipts` 中任何 checker 值重复；只更换其中一个字段仍不合格。多批任务每批也必须使用新的 worker ID 和 run ID。
+- 逐句语气、人物、关系、示例、约束和邻句判断只可引用 `checker_selected_evidence.strict_union` 中的实际记录；不得根据完整 profile 或 merged max 配置自行再选一次。
+- 从 source 重新建立主体、动作、对象、极性/否定、情态、speech act、文本功能和强度；当前 target 只用于保留变量、标签、换行、保护文本和已验证局部修改。
+- `optimized` 优先读取 `content_type`，否则读取 `text_type_context`；缺失或未知时按标准强度。文本功能和语气只能结合正式上下文证据判断，不能从项目或目标语言的词面硬猜。`full` 不因文本类型降低检查。
+- `source_semantics` 同时记录 source→candidate 的漏译检查和 candidate→source 的增译检查。仍有漏项或无来源信息时，不得提交候选。
+- `tone_decision` 必须给出源文或正式上下文证据。只要仍有不确定性，写入 `abstained_ids`。
+- `dialogue_context_readiness` 不完整或冲突时，不得依靠猜测补说话人、关系、礼貌度或 character voice。依赖这些信息的候选会被 publisher 硬拒绝。
+- 必须处理全部 `known_issues`，不是只处理 `trigger_issue_ids`；生成后再检查 Mistranslation、Omission、Addition、语法、自然度和全部 resolved constraints。
+- 变量、标签、换行和保护文本的数量与顺序必须保留。
+- `excluded_segments` 不得重新引入。未解决术语、保护段、输入阻断和约束冲突均不能被其他模块意见绕过。
+- 术语模块留下 `needs_confirmation: true` 的问题会由 publisher 硬拒绝；建议 worker 不得通过近似词、其他类别或自选译名绕过。
+- `resolution_status: reference_allowed` 只表示术语表不能强制当前句，不阻止按 source 正常翻译；此类候选仍须独立 verifier。`non_authorizing_evidence` 不能作为强制替换依据。
+- `validated_target` 只可作为已验证局部修改依据，不得被当作 source 语义证据，也不会产生模型候选的 `deterministic_accept`。
+- 不得输出 route、verdict、status、comment、corrected 或审校结论。
 
-`optimized` 只用上游文本类型路由：优先读取 `content_type`，否则读取 `text_type_context`；缺失或未知时按标准强度，不自行分类。`full` 只把文本类型作为上下文，不据此降低检查。
-
-发布候选：
+单批发布：
 
 ```bash
 python "$SCRIPTS/lqe_suggestions.py" publish-candidates \
   --job "$JOB" --input "$JOB/reference_suggestions.draft.json"
 ```
 
-publisher 重新派生实时 packet、校验完整 ID 覆盖、资料摘要和保护签名，并按候选文本重新评估已解析约束。约束明确不匹配时 `hard_reject`；约束通过或无法确定时，模型候选仍进入 `independent_verifier`；只有不受未验证约束影响的 canonical local edit 同值候选才可 `deterministic_accept`。
+多批发布：
 
-旧 `publish` 不再发布最终建议，会明确失败并提示新流程。
+```bash
+python "$SCRIPTS/lqe_suggestions.py" publish-candidates \
+  --job "$JOB" --input "$JOB/suggestion_context/batches"
+```
+
+publisher 重新派生实时 packet/批次计划，验证完整覆盖、资料绑定、worker receipts、保护签名和结构化语义收据。它只能验证结构与确定性约束，不能宣称候选语义正确；所有成功生成的候选均进入独立 verifier。旧 `publish` 会明确失败。

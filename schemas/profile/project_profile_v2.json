@@ -172,7 +172,8 @@
           "properties": {
             "before": {"type": "integer", "minimum": 0},
             "after": {"type": "integer", "minimum": 0},
-            "include_target": {"type": "boolean"}
+            "include_target": {"type": "boolean"},
+            "boundary_mode": {"enum": ["same_if_present", "strict"]}
           },
           "additionalProperties": false
         },

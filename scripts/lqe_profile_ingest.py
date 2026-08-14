@@ -356,7 +356,11 @@ def validate_review_examples(
             raise ProfileIngestError(
                 f"example {example['id']!r} cannot mix regression and runtime uses"
             )
-        if "runtime_reference" in uses and example.get("segment_key") in held_out:
+        if (
+            "runtime_reference" in uses
+            and example.get("segment_key") in held_out
+            and example["scope"] != "segment"
+        ):
             raise ProfileIngestError(
                 f"runtime example {example['id']!r} leaks a held-out segment"
             )

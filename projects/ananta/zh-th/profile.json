@@ -1,0 +1,86 @@
+{
+  "profile_contract_version": 2,
+  "name": "ananta/zh-th",
+  "language_pair": "zh-th",
+  "source_lang": "zh",
+  "target_lang": "th",
+  "game": "ANANTA（无限大）",
+  "background": "现代都市开放世界 RPG《ANANTA（无限大）》。当前公开 profile 仅声明通用审校边界；项目内部资料通过受控 overlay 提供。",
+  "checks": "checks.json",
+  "confirmed_rules": "confirmed_rules.md",
+  "assets": {
+    "checks": {
+      "kind": "checks",
+      "path": "checks.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "checks"
+      },
+      "distribution": "public_allowed",
+      "availability": "included"
+    },
+    "confirmed_rules": {
+      "kind": "confirmed_rules",
+      "path": "confirmed_rules.md",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "legacy_profile_field",
+        "field": "confirmed_rules"
+      },
+      "distribution": "public_allowed",
+      "availability": "included"
+    }
+  },
+  "wordcount_basis": "source-chars",
+  "scoring_policy": {
+    "threshold": 98,
+    "scorecard_profile": "legacy",
+    "severity_scale": "lisa",
+    "critical_gate": false,
+    "repeat_dedup": true
+  },
+  "context_pipeline": {
+    "mode": "off"
+  },
+  "capabilities": {
+    "context.core@1": {
+      "required": true,
+      "config": {
+        "identity": {
+          "key_columns": [
+            "key",
+            "Key",
+            "文本ID"
+          ],
+          "fallback": "source_coordinate"
+        },
+        "columns": {
+          "content_type": [
+            "content_type",
+            "text_type",
+            "文本类型",
+            "文本类别",
+            "句段类型"
+          ],
+          "context_note": [
+            "context_note",
+            "上下文备注",
+            "语境备注"
+          ]
+        }
+      }
+    },
+    "source_provenance@1": {
+      "required": true
+    }
+  }
+}

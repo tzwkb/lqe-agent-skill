@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import tempfile
 
+from lqe_corrections import CheckFormatError, build_segment_result
 from lqe_chunk import (
     _MODULE_ALLOWED_CATEGORIES,
     _load_verified_generation_unlocked,
@@ -42,8 +43,11 @@ from lqe_context_bundle import (
     ContextBundleError,
     WorkerContextBudgetError,
     build_context_bundle_set,
+    build_selected_context_evidence_index,
     build_worker_context_manifest,
     load_project_context_assets,
+    validate_selected_context_evidence_index,
+    verify_worker_context_manifest_resources,
 )
 
 try:
@@ -62,6 +66,7 @@ MAX_PACKETS_PER_WORKER = 4
 MAX_REVIEW_TEXT_CHARS_PER_WORKER = 25_000
 MAX_WORKER_INPUT_BYTES = 100_000
 _DIGEST_PLACEHOLDER = "0" * 64
+SELECTED_EVIDENCE_INDEX_PATH = "selected_evidence_index.json"
 
 _BASE_FIELDS = (
     "id",
@@ -104,6 +109,23 @@ def _with_digest(payload: dict, field: str) -> dict:
 
 def _nonempty(value: object) -> bool:
     return value is not None and value != "" and value != [] and value != {}
+
+
+def _normalize_worker_receipt(value: object) -> dict:
+    if not isinstance(value, dict) or set(value) != {"worker_id", "run_id"}:
+        raise ValueError("worker_receipt must contain worker_id and run_id")
+    output = {}
+    for field in ("worker_id", "run_id"):
+        text = value.get(field)
+        if (
+            not isinstance(text, str)
+            or not text
+            or text != text.strip()
+            or "\x00" in text
+        ):
+            raise ValueError(f"worker_receipt.{field} must be a non-empty string")
+        output[field] = text
+    return output
 
 
 def _owned_precheck(segment: dict, module: str) -> list[dict]:
@@ -243,6 +265,18 @@ def _context_path(module: str, batch_id: int, filename: str) -> str:
     return f"context/{module}/batch_{batch_id:02d}/{filename}"
 
 
+def _bind_packet_to_selected_evidence(packet: dict, index_digest: str) -> dict:
+    payload = copy.deepcopy(packet)
+    payload.pop("packet_digest", None)
+    payload.update(
+        {
+            "selected_evidence_index_path": SELECTED_EVIDENCE_INDEX_PATH,
+            "selected_evidence_index_digest": index_digest,
+        }
+    )
+    return _with_digest(payload, "packet_digest")
+
+
 def _worker_packet_basis(
     packet: dict,
     *,
@@ -358,6 +392,7 @@ def _build_context_batch(
     batch_id: int,
     packets: list[dict],
     state_by_id: dict[int, dict],
+    job_root: Path | None = None,
 ) -> tuple[list[dict], dict, dict]:
     reviewed_ids = sorted(
         {
@@ -386,6 +421,7 @@ def _build_context_batch(
         bundle_set,
         max_worker_bytes=MAX_WORKER_INPUT_BYTES,
         packet_payloads=worker_payloads,
+        job_root=job_root,
     )
     bound_packets = [
         _bind_packet_to_worker_context(
@@ -410,6 +446,7 @@ def _partition_context_batches(
     module: str,
     packets: list[dict],
     state_by_id: dict[int, dict],
+    job_root: Path | None = None,
 ) -> tuple[list[dict], list[dict]]:
     batches = []
     bound_packets = []
@@ -425,7 +462,12 @@ def _partition_context_batches(
                 f"{MAX_REVIEW_TEXT_CHARS_PER_WORKER}; split the batch"
             )
         return _build_context_batch(
-            state, module, batch_id, candidate, state_by_id
+            state,
+            module,
+            batch_id,
+            candidate,
+            state_by_id,
+            job_root,
         )
 
     def flush(candidate: list[dict]) -> None:
@@ -464,6 +506,7 @@ def build_worker_batch_plan(
     modules: list[str],
     packets: list[dict],
     context_batches: list[dict] | None = None,
+    selected_evidence_index: dict | None = None,
 ) -> dict:
     batches_by_module = {module: [] for module in modules}
     if context_batches is not None:
@@ -540,6 +583,15 @@ def build_worker_batch_plan(
         },
         "modules": batches_by_module,
     }
+    if selected_evidence_index is not None:
+        payload.update(
+            {
+                "selected_evidence_index_path": SELECTED_EVIDENCE_INDEX_PATH,
+                "selected_evidence_index_digest": selected_evidence_index[
+                    "index_digest"
+                ],
+            }
+        )
     return _with_digest(payload, "batch_plan_digest")
 
 
@@ -547,7 +599,8 @@ def _build_review_generation(
     state: dict,
     split_manifest: dict,
     bases: list[dict],
-) -> tuple[list[str], list[dict], list[dict], dict]:
+    job_root: Path | None = None,
+) -> tuple[list[str], list[dict], list[dict], dict, dict]:
     load_project_context_assets(state)
     modules = required_modules(state)
     unsupported = sorted(set(modules) - _SUPPORTED_MODULES)
@@ -555,47 +608,111 @@ def _build_review_generation(
         raise ValueError(
             "unsupported required modules: " + ", ".join(unsupported)
         )
-    packets = [
+    unbound_packets = [
         build_review_packet(base, module, get_review_policy(state))
         for module in modules
         for base in bases
     ]
-    context_batches = []
     state_by_id = {segment["id"]: segment for segment in state["segments"]}
-    replacements = {}
-    for module in modules:
-        module_packets = [
-            packet
-            for packet in packets
-            if packet["module"] == module and packet["requires_ai"]
-        ]
-        bound, batches = _partition_context_batches(
-            state, module, module_packets, state_by_id
+
+    def partition_all(input_packets: list[dict]) -> tuple[list[dict], list[dict]]:
+        context_batches = []
+        replacements = {}
+        for module in modules:
+            module_packets = [
+                packet
+                for packet in input_packets
+                if packet["module"] == module and packet["requires_ai"]
+            ]
+            bound, batches = _partition_context_batches(
+                state,
+                module,
+                module_packets,
+                state_by_id,
+                job_root,
+            )
+            replacements.update(
+                {
+                    (packet["module"], packet["chunk_id"]): packet
+                    for packet in bound
+                }
+            )
+            context_batches.extend(batches)
+        return (
+            [
+                replacements.get(
+                    (packet["module"], packet["chunk_id"]),
+                    packet,
+                )
+                for packet in input_packets
+            ],
+            context_batches,
         )
-        replacements.update(
-            {(packet["module"], packet["chunk_id"]): packet for packet in bound}
+
+    _, provisional_batches = partition_all(unbound_packets)
+    selected_evidence_index = build_selected_context_evidence_index(
+        state,
+        split_fingerprint=split_manifest["split_fingerprint"],
+        split_manifest_digest=split_manifest["manifest_digest"],
+        modules=modules,
+        context_bundle_sets=[
+            item["context_bundle_set"] for item in provisional_batches
+        ],
+    )
+    evidence_bound_packets = [
+        _bind_packet_to_selected_evidence(
+            packet,
+            selected_evidence_index["index_digest"],
         )
-        context_batches.extend(batches)
-    packets = [
-        replacements.get((packet["module"], packet["chunk_id"]), packet)
-        for packet in packets
+        for packet in unbound_packets
     ]
+    packets, context_batches = partition_all(evidence_bound_packets)
+    final_index = build_selected_context_evidence_index(
+        state,
+        split_fingerprint=split_manifest["split_fingerprint"],
+        split_manifest_digest=split_manifest["manifest_digest"],
+        modules=modules,
+        context_bundle_sets=[
+            item["context_bundle_set"] for item in context_batches
+        ],
+    )
+    if final_index != selected_evidence_index:
+        raise ContextBundleError(
+            "selected evidence changed after worker packet binding"
+        )
     batch_plan = build_worker_batch_plan(
         split_manifest,
         modules,
         packets,
         context_batches=context_batches,
+        selected_evidence_index=selected_evidence_index,
     )
-    return modules, packets, context_batches, batch_plan
+    return (
+        modules,
+        packets,
+        context_batches,
+        selected_evidence_index,
+        batch_plan,
+    )
 
 
 def _build_review_artifacts(
     state: dict,
     split_manifest: dict,
     bases: list[dict],
-) -> tuple[list[str], list[dict], list[dict], dict, dict, dict]:
-    modules, packets, context_batches, batch_plan = _build_review_generation(
-        state, split_manifest, bases
+    job_root: Path | None = None,
+) -> tuple[list[str], list[dict], list[dict], dict, dict, dict, dict]:
+    (
+        modules,
+        packets,
+        context_batches,
+        selected_evidence_index,
+        batch_plan,
+    ) = _build_review_generation(
+        state,
+        split_manifest,
+        bases,
+        job_root,
     )
     cost_report = _build_cost_report(bases, modules, packets, batch_plan)
     packet_manifest = _build_packet_manifest(
@@ -604,11 +721,13 @@ def _build_review_artifacts(
         packets,
         batch_plan,
         context_batches,
+        selected_evidence_index,
     )
     return (
         modules,
         packets,
         context_batches,
+        selected_evidence_index,
         batch_plan,
         cost_report,
         packet_manifest,
@@ -668,6 +787,7 @@ def _build_packet_manifest(
     packets: list[dict],
     batch_plan: dict,
     context_batches: list[dict] | None = None,
+    selected_evidence_index: dict | None = None,
 ) -> dict:
     payload = {
         "schema": PACKET_MANIFEST_SCHEMA,
@@ -685,6 +805,15 @@ def _build_packet_manifest(
             for item in (context_batches or [])
         },
     }
+    if selected_evidence_index is not None:
+        payload.update(
+            {
+                "selected_evidence_index_path": SELECTED_EVIDENCE_INDEX_PATH,
+                "selected_evidence_index_digest": selected_evidence_index[
+                    "index_digest"
+                ],
+            }
+        )
     return _with_digest(payload, "manifest_digest")
 
 
@@ -695,6 +824,7 @@ def _packet_tree_is_current(
     cost_report: dict,
     batch_plan: dict,
     context_batches: list[dict] | None = None,
+    selected_evidence_index: dict | None = None,
 ) -> bool:
     try:
         if load(active / "manifest.json") != packet_manifest:
@@ -703,6 +833,14 @@ def _packet_tree_is_current(
             return False
         if load(active / "batch_plan.json") != batch_plan:
             return False
+        if selected_evidence_index is not None:
+            persisted_index = load(active / SELECTED_EVIDENCE_INDEX_PATH)
+            if persisted_index != selected_evidence_index:
+                return False
+            if validate_selected_context_evidence_index(
+                persisted_index
+            ) != selected_evidence_index:
+                return False
         for packet in packets:
             if load(active / _packet_name(packet)) != packet:
                 return False
@@ -712,14 +850,20 @@ def _packet_tree_is_current(
                 / _context_path(item["module"], item["batch_id"], "bundle_set.json")
             ) != item["context_bundle_set"]:
                 return False
-            if load(
+            persisted_manifest = load(
                 active
                 / _context_path(
                     item["module"], item["batch_id"], "worker_manifest.json"
                 )
+            )
+            if persisted_manifest != item["worker_manifest"]:
+                return False
+            if verify_worker_context_manifest_resources(
+                persisted_manifest,
+                job_root=active.parent,
             ) != item["worker_manifest"]:
                 return False
-    except (OSError, ValueError):
+    except (ContextBundleError, OSError, ValueError):
         return False
     return True
 
@@ -741,10 +885,11 @@ def cmd_prepare(args) -> None:
                 modules,
                 packets,
                 context_batches,
+                selected_evidence_index,
                 batch_plan,
                 cost_report,
                 packet_manifest,
-            ) = _build_review_artifacts(state, split_manifest, bases)
+            ) = _build_review_artifacts(state, split_manifest, bases, job)
         except (ContextBundleError, OSError, ValueError) as exc:
             raise SystemExit(f"[review-prepare] worker context: {exc}") from exc
         active = job / "review_packets"
@@ -755,6 +900,7 @@ def cmd_prepare(args) -> None:
             cost_report,
             batch_plan,
             context_batches,
+            selected_evidence_index,
         ):
             print(f"[review-prepare] existing packets are current: {active}")
             print(
@@ -770,6 +916,10 @@ def cmd_prepare(args) -> None:
             staging = Path(staging_name)
             for packet in packets:
                 write_json_atomic(staging / _packet_name(packet), packet)
+            write_json_atomic(
+                staging / SELECTED_EVIDENCE_INDEX_PATH,
+                selected_evidence_index,
+            )
             for item in context_batches:
                 write_json_atomic(
                     staging
@@ -838,10 +988,11 @@ def _live_review_packet_unlocked(
             _,
             packets,
             context_batches,
+            selected_evidence_index,
             batch_plan,
             cost_report,
             packet_manifest,
-        ) = _build_review_artifacts(state, split_manifest, bases)
+        ) = _build_review_artifacts(state, split_manifest, bases, job)
     except (ContextBundleError, OSError, ValueError) as exc:
         raise SystemExit(f"[review-publish] worker context: {exc}") from exc
     if not _packet_tree_is_current(
@@ -851,6 +1002,7 @@ def _live_review_packet_unlocked(
         cost_report,
         batch_plan,
         context_batches,
+        selected_evidence_index,
     ):
         raise SystemExit(
             "[review-publish] prepared review packet tree is missing or stale; "
@@ -884,10 +1036,12 @@ def _live_review_packet(
 def _load_compact_draft(
     path: Path,
     packet: dict,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     raw = load(path)
     if not isinstance(raw, dict):
         raise ValueError("compact draft must be an object")
+    if "worker_receipt" not in raw:
+        raise ValueError("compact draft worker_receipt is required")
     expected_fields = {
         "schema",
         "version",
@@ -896,6 +1050,9 @@ def _load_compact_draft(
         "packet_digest",
         "reviewed_ids",
         "findings",
+        "selected_evidence_index_path",
+        "selected_evidence_index_digest",
+        "worker_receipt",
     }
     context_binding_fields = {
         "worker_batch_id",
@@ -913,6 +1070,12 @@ def _load_compact_draft(
         "module": packet["module"],
         "chunk_id": packet["chunk_id"],
         "packet_digest": packet["packet_digest"],
+        "selected_evidence_index_path": packet[
+            "selected_evidence_index_path"
+        ],
+        "selected_evidence_index_digest": packet[
+            "selected_evidence_index_digest"
+        ],
     }
     for field in context_binding_fields:
         if field in packet:
@@ -941,7 +1104,7 @@ def _load_compact_draft(
             raise ValueError(
                 f"compact draft finding id {entry['id']} has no issues; omit it"
             )
-    return findings
+    return findings, _normalize_worker_receipt(raw["worker_receipt"])
 
 
 def _publish_full_entries(
@@ -952,6 +1115,7 @@ def _publish_full_entries(
     packet: dict,
     *,
     draft_path: Path | None = None,
+    worker_receipt: dict | None = None,
 ) -> None:
     outdir = job / "chunks"
     with generation_lock(outdir, exclusive=True):
@@ -963,6 +1127,15 @@ def _publish_full_entries(
                 "[review-publish] stale task: live review packet changed; "
                 "rerun lqe_review.py prepare"
             )
+        if live_packet["requires_ai"] and worker_receipt is None:
+            raise SystemExit(
+                "[review-publish] AI-reviewed packet requires worker_receipt"
+            )
+        if worker_receipt is not None:
+            try:
+                worker_receipt = _normalize_worker_receipt(worker_receipt)
+            except ValueError as exc:
+                raise SystemExit(f"[review-publish] {exc}") from exc
         expected_ids = {segment["id"] for segment in live_base["segments"]}
         actual_ids = {entry["id"] for entry in entries}
         if actual_ids != expected_ids:
@@ -979,7 +1152,21 @@ def _publish_full_entries(
             )
             for segment in live_base["segments"]
         }
+        segment_by_id = {
+            segment["id"]: segment for segment in live_base["segments"]
+        }
         for entry in entries:
+            try:
+                build_segment_result(
+                    segment_by_id[entry["id"]],
+                    entry["issues"],
+                    review_policy=get_review_policy(state),
+                )
+            except CheckFormatError as exc:
+                raise SystemExit(
+                    "[review-publish] invalid correction contract for "
+                    f"id {entry['id']}: {exc}"
+                ) from exc
             if module in {"precheck_review", "terminology"}:
                 reviewed_issues = (
                     entry["issues"]
@@ -1030,6 +1217,13 @@ def _publish_full_entries(
                 payload,
                 split_manifest,
                 destination,
+                review_provenance={
+                    "review_packet_digest": live_packet["packet_digest"],
+                    "selected_evidence_index_digest": live_packet[
+                        "selected_evidence_index_digest"
+                    ],
+                    "worker_receipt": worker_receipt,
+                },
             )
             with tempfile.TemporaryDirectory(
                 dir=outdir,
@@ -1066,7 +1260,7 @@ def cmd_publish(args) -> None:
     base, packet = _live_review_packet(job, args.chunk, args.module)
     draft_path = Path(args.input)
     try:
-        findings = _load_compact_draft(draft_path, packet)
+        findings, worker_receipt = _load_compact_draft(draft_path, packet)
     except (OSError, ValueError) as exc:
         raise SystemExit(f"[review-publish] {exc}") from exc
     entries = _expand_findings(base, findings)
@@ -1077,6 +1271,7 @@ def cmd_publish(args) -> None:
         entries,
         packet,
         draft_path=draft_path,
+        worker_receipt=worker_receipt,
     )
     print(
         f"[review-publish] reviewed {len(packet['reviewed_ids'])}, "
@@ -1101,10 +1296,11 @@ def cmd_auto_publish(args) -> None:
                 _,
                 packets,
                 context_batches,
+                selected_evidence_index,
                 batch_plan,
                 cost_report,
                 packet_manifest,
-            ) = _build_review_artifacts(state, split_manifest, bases)
+            ) = _build_review_artifacts(state, split_manifest, bases, job)
         except (ContextBundleError, OSError, ValueError) as exc:
             raise SystemExit(f"[review-auto-publish] worker context: {exc}") from exc
         if not _packet_tree_is_current(
@@ -1114,6 +1310,7 @@ def cmd_auto_publish(args) -> None:
             cost_report,
             batch_plan,
             context_batches,
+            selected_evidence_index,
         ):
             raise SystemExit(
                 "[review-auto-publish] prepared review packet tree is missing or "

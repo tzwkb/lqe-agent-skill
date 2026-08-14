@@ -32,6 +32,61 @@ SUGGESTIONS = SCRIPTS / "lqe_suggestions.py"
 REVIEW = SCRIPTS / "lqe_suggestion_review.py"
 
 
+def source_semantics():
+    return {
+        "subjects": ["source subject"],
+        "actions": ["source action"],
+        "objects": [],
+        "negation": {"present": False, "scope": None},
+        "polarity": "affirmative",
+        "modality": [],
+        "speech_act": "statement",
+        "text_function": "inform",
+        "intensity": "neutral",
+        "omitted_source_elements": [],
+        "unsupported_additions": [],
+    }
+
+
+def tone_decision():
+    return {
+        "register": "neutral",
+        "politeness": "neutral",
+        "depends_on_dialogue_context": False,
+        "evidence": [{"type": "source_form", "value": "neutral source"}],
+        "uncertainties": [],
+    }
+
+
+def generation_entry(segment_id, reference_target):
+    return {
+        "id": segment_id,
+        "reference_target": reference_target,
+        "source_semantics": source_semantics(),
+        "tone_decision": tone_decision(),
+    }
+
+
+def semantic_verification(status="pass"):
+    fields = (
+        "subjects",
+        "actions",
+        "objects",
+        "polarity_negation",
+        "modality",
+        "speech_act",
+        "text_function",
+        "intensity",
+        "omissions",
+        "unsupported_additions",
+        "tone",
+    )
+    return {
+        field: {"status": status, "evidence": f"{field} checked against source."}
+        for field in fields
+    }
+
+
 def write_json(path: Path, value: object) -> None:
     if (
         path.name == "state.json"
@@ -232,13 +287,25 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "worker_receipt": {
+                "worker_id": "generation-worker",
+                "run_id": "generation-run",
+            },
             "selection": packet["selection"],
             "reviewed_ids": packet["reviewed_ids"],
             "entries": [
-                {"id": 0, "reference_target": "Right {0}"},
-                {"id": 2, "reference_target": "Complete"},
+                generation_entry(0, "Right {0}"),
+                generation_entry(2, "Complete"),
             ],
             "abstained_ids": [1, 3],
+            "abstention_reasons": [
+                {
+                    "id": segment_id,
+                    "reason_codes": ["SOURCE_INTENT_UNCERTAIN"],
+                    "evidence": "The available source/context evidence is insufficient.",
+                }
+                for segment_id in (1, 3)
+            ],
         }
         draft_path = self.job / "reference_suggestions.draft.json"
         write_json(draft_path, draft)
@@ -270,15 +337,34 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         )
         self.assertEqual(worker_manifest["budget"]["max_bytes"], 100_000)
         self.assertLessEqual(worker_manifest["budget"]["measured_bytes"], 100_000)
+        self.assertTrue(worker_manifest["worker_documents"])
+        self.assertEqual(
+            {
+                item["id"]: item["locator"]["kind"]
+                for item in worker_manifest["worker_documents"]
+            },
+            {
+                "confirmed_rules_path": "job_relative",
+                "sg_path": "job_relative",
+            },
+        )
         self.assertEqual(candidates["worker_context_manifest_digest"], context_digest)
         self.assertEqual(
             [route["risk_route"] for route in candidates["routes"]],
             [
                 "independent_verifier",
-                "deterministic_accept",
+                "hard_reject",
                 "independent_verifier",
                 "hard_reject",
             ],
+        )
+        self.assertEqual(
+            [item["id"] for item in candidates["abstention_reasons"]],
+            [1, 3],
+        )
+        self.assertEqual(
+            candidates["routes"][1]["reason_codes"],
+            ["WORKER_ABSTAINED", "SOURCE_INTENT_UNCERTAIN"],
         )
 
         prepared = self.run_script(REVIEW, "prepare", "--job", self.job)
@@ -315,6 +401,10 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "worker_receipt": {
+                "worker_id": "review-worker",
+                "run_id": "review-run",
+            },
             "reviewed_ids": packet["reviewed_ids"],
             "verdicts": [
                 {
@@ -323,6 +413,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                     "decision": "accept",
                     "reason_codes": [],
                     "evidence": "Meaning, issues, placeholders and constraints pass.",
+                    "semantic_verification": semantic_verification(),
                 },
                 {
                     "id": 2,
@@ -330,6 +421,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                     "decision": "reject",
                     "reason_codes": ["OMISSION_REMAINS"],
                     "evidence": "The candidate still loses source detail.",
+                    "semantic_verification": semantic_verification("fail"),
                 },
             ],
         }
@@ -347,8 +439,8 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         )
         self.assertEqual(review["worker_context_manifest_digest"], context_digest)
         self.assertEqual(final["worker_context_manifest_digest"], context_digest)
-        self.assertEqual([entry["id"] for entry in final["final_entries"]], [0, 1])
-        self.assertEqual([entry["id"] for entry in final["excluded_ids"]], [2, 3])
+        self.assertEqual([entry["id"] for entry in final["final_entries"]], [0])
+        self.assertEqual([entry["id"] for entry in final["excluded_ids"]], [1, 2, 3])
 
         state = json.loads((self.job / "state.json").read_text(encoding="utf-8"))
         state["segments"][0]["target"] = "Changed {0}"
@@ -356,6 +448,232 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         stale = self.run_script(SUGGESTIONS, "validate", "--job", self.job)
         self.assertNotEqual(stale.returncode, 0)
         self.assertIn("stale", stale.stderr)
+
+    def test_suggestion_context_is_required_module_union_and_has_readable_index(self):
+        prepared = self.run_script(SUGGESTIONS, "prepare", "--job", self.job)
+        self.assert_ok(prepared)
+        packet = json.loads(
+            (self.job / "reference_suggestions.packet.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        basis = packet["context_view_basis"]
+        self.assertEqual(
+            basis["source_modules"],
+            ["terminology", "accuracy", "grammar", "naturalness", "suggestions"],
+        )
+        self.assertEqual(
+            set(basis["merged_view"]["dimensions"]),
+            {"terminology", "accuracy", "grammar", "naturalness", "suggestions"},
+        )
+        index_path = self.job / packet["content_index"]["path"]
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            packet["content_index"]["digest"],
+            index["content_index_digest"],
+        )
+        self.assertTrue(index["resources"])
+        self.assertTrue(all(
+            resource["delivery"] in {"job_relative_path", "embedded_text"}
+            for resource in index["resources"]
+        ))
+
+    def test_review_worker_must_be_independent_and_accept_all_semantic_checks(self):
+        self.prepare_candidates()
+        self.assert_ok(self.run_script(REVIEW, "prepare", "--job", self.job))
+        packet = json.loads(
+            (self.job / "suggestion_review.packet.json").read_text(encoding="utf-8")
+        )
+        verdicts = [{
+            "id": entry["id"],
+            "candidate_digest": entry["candidate_digest"],
+            "decision": "accept",
+            "reason_codes": [],
+            "evidence": "Checked independently.",
+            "semantic_verification": semantic_verification(),
+        } for entry in packet["entries"]]
+        same_worker = {
+            "schema": "lqe.suggestion-review-draft",
+            "version": 1,
+            "review_packet_digest": packet["packet_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "worker_receipt": {
+                "worker_id": "generation-worker",
+                "run_id": "review-run-2",
+            },
+            "reviewed_ids": packet["reviewed_ids"],
+            "verdicts": verdicts,
+        }
+        with self.assertRaisesRegex(ValueError, "worker_id must differ"):
+            lqe_suggestion_review.validate_review_draft(same_worker, packet)
+
+        failed_check = json.loads(json.dumps(same_worker))
+        failed_check["worker_receipt"] = {
+            "worker_id": "review-worker-2",
+            "run_id": "review-run-2",
+        }
+        failed_check["verdicts"][0]["semantic_verification"]["unsupported_additions"][
+            "status"
+        ] = "fail"
+        with self.assertRaisesRegex(ValueError, "without passing every"):
+            lqe_suggestion_review.validate_review_draft(failed_check, packet)
+
+    def test_oversized_suggestions_are_batched_and_merged_without_truncation(self):
+        state = json.loads((self.job / "state.json").read_text(encoding="utf-8"))
+        segments = []
+        errors = []
+        for segment_id in range(14):
+            source = f"Source {segment_id} " + ("x" * 8_000)
+            target = f"Target {segment_id}"
+            segment = {
+                "id": segment_id,
+                "source": source,
+                "target": target,
+                "protected_texts": [],
+                "segment_key": f"segment-{segment_id}",
+                "key_origin": "generated",
+                "source_digest": source_digest(source),
+                "input_status": "ready",
+                "input_block_reasons": [],
+                "input_warnings": [],
+                "protected": False,
+                "protected_reason": None,
+                "context": {
+                    "context_contract_version": 1,
+                    "status": "ready",
+                    "core": {"content_type": "general", "context_note": None},
+                    "extensions": {},
+                    "provenance": {},
+                    "missing_required": [],
+                },
+                "resolved_constraints": [],
+            }
+            segment["segment_revision_digest"] = canonical_digest({
+                "id": segment_id,
+                "source": source,
+                "target": target,
+                "context": segment["context"],
+            })
+            segments.append(segment)
+            errors.append({
+                "id": segment_id,
+                "errors": [issue("Mistranslation", "Meaning is wrong.")],
+                "corrected": None,
+            })
+        state["segments"] = segments
+        state["wordcount"] = sum(len(segment["source"]) for segment in segments)
+        write_json(self.job / "state.json", state)
+        write_json(self.job / "errors.json", errors)
+
+        prepared = self.run_script(SUGGESTIONS, "prepare", "--job", self.job)
+        self.assert_ok(prepared)
+        root_packet = json.loads(
+            (self.job / "reference_suggestions.packet.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        plan_path = self.job / root_packet["batch_plan"]["path"]
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        self.assertGreater(len(plan["batches"]), 1)
+        covered = [
+            segment_id
+            for batch in plan["batches"]
+            for segment_id in batch["reviewed_ids"]
+        ]
+        self.assertEqual(covered, list(range(14)))
+        for batch_index, record in enumerate(plan["batches"]):
+            packet = json.loads(
+                (self.job / record["packet_path"]).read_text(encoding="utf-8")
+            )
+            draft = {
+                "schema": "lqe.reference-suggestion-generation-draft",
+                "version": 5,
+                "packet_digest": packet["packet_digest"],
+                "worker_context_manifest_digest": packet[
+                    "worker_context_manifest_digest"
+                ],
+                "worker_receipt": {
+                    "worker_id": f"generation-worker-{batch_index}",
+                    "run_id": f"generation-run-{batch_index}",
+                },
+                "selection": packet["selection"],
+                "reviewed_ids": packet["reviewed_ids"],
+                "entries": [
+                    generation_entry(segment["id"], f"Reviewed {segment['id']}")
+                    for segment in packet["segments"]
+                ],
+                "abstained_ids": [],
+                "abstention_reasons": [],
+            }
+            write_json(self.job / record["draft_path"], draft)
+        published = self.run_script(
+            SUGGESTIONS,
+            "publish-candidates",
+            "--job",
+            self.job,
+            "--input",
+            self.job / "suggestion_context" / "batches",
+        )
+        self.assert_ok(published)
+        candidates = json.loads(
+            (self.job / "reference_suggestions.candidates.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(len(candidates["routes"]), 14)
+        self.assertEqual(len(candidates["generation_worker_receipts"]), len(plan["batches"]))
+
+        self.assert_ok(self.run_script(REVIEW, "prepare", "--job", self.job))
+        review_root = json.loads(
+            (self.job / "suggestion_review.packet.json").read_text(encoding="utf-8")
+        )
+        review_plan = json.loads(
+            (self.job / review_root["batch_plan"]["path"]).read_text(encoding="utf-8")
+        )
+        review_covered = [
+            segment_id
+            for batch in review_plan["batches"]
+            for segment_id in batch["reviewed_ids"]
+        ]
+        self.assertEqual(review_covered, list(range(14)))
+        for batch_index, record in enumerate(review_plan["batches"]):
+            packet = json.loads(
+                (self.job / record["packet_path"]).read_text(encoding="utf-8")
+            )
+            draft = {
+                "schema": "lqe.suggestion-review-draft",
+                "version": 1,
+                "review_packet_digest": packet["packet_digest"],
+                "worker_context_manifest_digest": packet[
+                    "worker_context_manifest_digest"
+                ],
+                "worker_receipt": {
+                    "worker_id": f"review-worker-{batch_index}",
+                    "run_id": f"review-run-{batch_index}",
+                },
+                "reviewed_ids": packet["reviewed_ids"],
+                "verdicts": [{
+                    "id": entry["id"],
+                    "candidate_digest": entry["candidate_digest"],
+                    "decision": "accept",
+                    "reason_codes": [],
+                    "evidence": "Every semantic and tone field matches.",
+                    "semantic_verification": semantic_verification(),
+                } for entry in packet["entries"]],
+            }
+            write_json(self.job / record["draft_path"], draft)
+        self.assert_ok(self.run_script(REVIEW, "publish-review", "--job", self.job))
+        self.assert_ok(self.run_script(REVIEW, "publish-final", "--job", self.job))
+        self.assert_ok(self.run_script(SUGGESTIONS, "validate", "--job", self.job))
+        final = json.loads(
+            (self.job / "reference_suggestions.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [entry["id"] for entry in final["final_entries"]],
+            list(range(14)),
+        )
 
     def test_verifier_instruction_change_stales_review_and_final(self):
         generation_packet, candidates = self.prepare_candidates()
@@ -367,6 +685,10 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "worker_receipt": {
+                "worker_id": "review-worker",
+                "run_id": "review-run",
+            },
             "reviewed_ids": packet["reviewed_ids"],
             "verdicts": [
                 {
@@ -375,6 +697,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                     "decision": "accept",
                     "reason_codes": [],
                     "evidence": "Source meaning and constraints pass.",
+                    "semantic_verification": semantic_verification(),
                 }
                 for entry in packet["entries"]
             ],
@@ -435,10 +758,22 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "worker_receipt": {
+                "worker_id": "generation-worker",
+                "run_id": "generation-run",
+            },
             "selection": packet["selection"],
             "reviewed_ids": packet["reviewed_ids"],
             "entries": [],
             "abstained_ids": [entry["id"] for entry in packet["segments"]],
+            "abstention_reasons": [
+                {
+                    "id": entry["id"],
+                    "reason_codes": ["SOURCE_INTENT_UNCERTAIN"],
+                    "evidence": "The worker cannot establish source intent.",
+                }
+                for entry in packet["segments"]
+            ],
         }
         draft_path = self.job / "reference_suggestions.draft.json"
         write_json(draft_path, draft)
@@ -492,6 +827,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                 "decision": "accept",
                 "reason_codes": [],
                 "evidence": "Passes all checks.",
+                "semantic_verification": semantic_verification(),
                 "reference_target": "Tampered",
             })
         write_json(
@@ -503,6 +839,10 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                 "worker_context_manifest_digest": packet[
                     "worker_context_manifest_digest"
                 ],
+                "worker_receipt": {
+                    "worker_id": "review-worker",
+                    "run_id": "review-run",
+                },
                 "reviewed_ids": packet["reviewed_ids"],
                 "verdicts": verdicts,
             },

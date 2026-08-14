@@ -82,6 +82,20 @@ except ImportError:  # legacy bootstrap
     validate_capability_descriptor = None
 
 
+LEGACY_DEFAULT_SPLIT_SIZE = 100
+ENFORCE_DEFAULT_SPLIT_SIZE = 5
+
+
+def resolve_split_size(state: dict, requested_size: int | None) -> int:
+    if requested_size is not None:
+        return requested_size
+    pipeline = state.get("context_pipeline")
+    mode = pipeline.get("mode") if isinstance(pipeline, dict) else "off"
+    if mode == "enforce":
+        return ENFORCE_DEFAULT_SPLIT_SIZE
+    return LEGACY_DEFAULT_SPLIT_SIZE
+
+
 def _state_context_registry(state: dict):
     if descriptor_registry is None:
         return None
@@ -609,7 +623,7 @@ def cmd_split(a):
         terms = load_terms(state)
     segs = state["segments"]
     context_registry = _state_context_registry(state)
-    size = a.size
+    size = resolve_split_size(state, a.size)
     budget = getattr(a, "char_budget", 0) or 0
     scope = get_check_scope(state)
     revision = build_split_revision(
@@ -1155,10 +1169,41 @@ def module_receipt_path(module_path: Path) -> Path:
     return path.with_name(f"{path.stem}.receipt.json")
 
 
+def _normalize_review_provenance(value: object) -> dict:
+    if not isinstance(value, dict) or set(value) != {
+        "review_packet_digest",
+        "selected_evidence_index_digest",
+        "worker_receipt",
+    }:
+        raise CheckFormatError("module receipt review provenance is invalid")
+    for field in ("review_packet_digest", "selected_evidence_index_digest"):
+        digest = value.get(field)
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise CheckFormatError(f"module receipt {field} is invalid")
+    worker = value.get("worker_receipt")
+    if worker is not None:
+        if not isinstance(worker, dict) or set(worker) != {"worker_id", "run_id"}:
+            raise CheckFormatError("module receipt worker_receipt is invalid")
+        for field in ("worker_id", "run_id"):
+            text = worker.get(field)
+            if (
+                not isinstance(text, str)
+                or not text
+                or text != text.strip()
+                or "\x00" in text
+            ):
+                raise CheckFormatError(
+                    f"module receipt worker_receipt.{field} is invalid"
+                )
+    return copy.deepcopy(value)
+
+
 def build_module_receipt(
     payload: dict,
     manifest: dict,
     destination: Path,
+    *,
+    review_provenance: dict | None = None,
 ) -> dict:
     receipt = {
         "schema": MODULE_RECEIPT_SCHEMA,
@@ -1171,6 +1216,10 @@ def build_module_receipt(
         "chunk_id": payload["chunk_id"],
         "module_output_digest": canonical_digest(payload),
     }
+    if review_provenance is not None:
+        receipt["review_provenance"] = _normalize_review_provenance(
+            review_provenance
+        )
     receipt["receipt_digest"] = canonical_digest(receipt)
     return receipt
 
@@ -1191,7 +1240,13 @@ def validate_module_receipt(
         raise CheckFormatError(
             f"{receipt_path.name}: publication receipt is invalid"
         )
-    expected = build_module_receipt(payload, manifest, destination)
+    review_provenance = actual.get("review_provenance")
+    expected = build_module_receipt(
+        payload,
+        manifest,
+        destination,
+        review_provenance=review_provenance,
+    )
     if actual != expected:
         raise CheckFormatError(
             f"{receipt_path.name}: publication receipt mismatch"
@@ -2053,7 +2108,15 @@ def main():
     s.add_argument("--errors", required=True)
     s.add_argument("--terms", default=None)
     s.add_argument("--outdir", required=True)
-    s.add_argument("--size", type=int, default=100)
+    s.add_argument(
+        "--size",
+        type=int,
+        default=None,
+        help=(
+            "maximum segments per chunk; defaults to 5 for context enforce "
+            "jobs and 100 for off/shadow jobs"
+        ),
+    )
     s.add_argument("--char-budget", type=int, default=0,
                    help="按源文和译文总字符数分块；0 表示固定按 --size 分块，--size 始终是段数上限")
     s.set_defaults(fn=cmd_split)

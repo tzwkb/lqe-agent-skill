@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/job_context_overrides_v1.json",
+  "title": "LQE job context overrides v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "segment_set_digest",
+    "authority_source",
+    "entries"
+  ],
+  "properties": {
+    "schema": {"const": "lqe.job-context-overrides"},
+    "version": {"const": 1},
+    "segment_set_digest": {"$ref": "#/$defs/sha256"},
+    "authority_source": {"$ref": "#/$defs/authority_source"},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "authority_source": {
+      "type": "object",
+      "required": ["source_id", "kind", "issuer"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/nonempty"},
+        "kind": {"enum": ["human", "authorized_system"]},
+        "issuer": {"$ref": "#/$defs/nonempty"},
+        "authorization_ref": {"$ref": "#/$defs/nonempty"}
+      },
+      "additionalProperties": false
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "segment_key",
+        "source_digest",
+        "verification_status",
+        "context_patch",
+        "provenance"
+      ],
+      "properties": {
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "source_digest": {"$ref": "#/$defs/sha256"},
+        "source_preview": {"type": "string"},
+        "verification_status": {"enum": ["pending", "verified"]},
+        "context_patch": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": true
+        },
+        "expected_context": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": true
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["record_id"],
+          "properties": {
+            "record_id": {"$ref": "#/$defs/nonempty"},
+            "note": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

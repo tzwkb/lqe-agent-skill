@@ -25,6 +25,42 @@ from lqe_suggestions import (
 
 
 WORKER_CONTEXT_MANIFEST_DIGEST = "a" * 64
+GENERATION_RECEIPT = {"worker_id": "generation-worker", "run_id": "generation-run"}
+
+
+def source_semantics():
+    return {
+        "subjects": ["source subject"],
+        "actions": ["source action"],
+        "objects": [],
+        "negation": {"present": False, "scope": None},
+        "polarity": "affirmative",
+        "modality": [],
+        "speech_act": "statement",
+        "text_function": "inform",
+        "intensity": "neutral",
+        "omitted_source_elements": [],
+        "unsupported_additions": [],
+    }
+
+
+def tone_decision():
+    return {
+        "register": "neutral",
+        "politeness": "neutral",
+        "depends_on_dialogue_context": False,
+        "evidence": [{"type": "source_form", "value": "neutral source"}],
+        "uncertainties": [],
+    }
+
+
+def suggestion_entry(segment_id, reference_target):
+    return {
+        "id": segment_id,
+        "reference_target": reference_target,
+        "source_semantics": source_semantics(),
+        "tone_decision": tone_decision(),
+    }
 
 
 def build_suggestion_packet(*args, **kwargs):
@@ -367,10 +403,12 @@ class ReferenceSuggestionContractTests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "worker_receipt": GENERATION_RECEIPT,
             "selection": packet["selection"],
             "reviewed_ids": packet["reviewed_ids"],
-            "entries": [{"id": 0, "reference_target": "red fruit"}],
+            "entries": [suggestion_entry(0, "red fruit")],
             "abstained_ids": [],
+            "abstention_reasons": [],
         }
         with self.assertRaisesRegex(ValueError, "coverage"):
             validate_generation_draft(draft, packet)
@@ -442,10 +480,12 @@ class ReferenceSuggestionContractTests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "worker_receipt": GENERATION_RECEIPT,
             "selection": packet["selection"],
             "reviewed_ids": packet["reviewed_ids"],
-            "entries": [{"id": 0, "reference_target": "Better target"}],
+            "entries": [suggestion_entry(0, "Better target")],
             "abstained_ids": [],
+            "abstention_reasons": [],
         }
         artifact = build_candidate_artifact(packet, draft, segments)
         self.assertEqual(artifact["entries"], [])
@@ -456,6 +496,75 @@ class ReferenceSuggestionContractTests(unittest.TestCase):
                 "risk_route": "hard_reject",
                 "reason_codes": ["DETERMINISTIC_VALIDATION_FAILED"],
             }],
+        )
+
+    def test_dialogue_dependent_tone_fails_closed_when_context_is_incomplete(self):
+        segments = [{
+            "id": 0,
+            "source": "Follow me home!",
+            "target": "Come with me.",
+            "context": {
+                "context_contract_version": 1,
+                "status": "context_incomplete",
+                "core": {"content_type": "dialogue"},
+                "extensions": {
+                    "dialogue": {
+                        "status": "incomplete",
+                        "speaker_id": "speaker",
+                    }
+                },
+                "provenance": {},
+                "missing_required": [],
+            },
+        }]
+        results = [{
+            "id": 0,
+            "errors": [issue("The character voice is wrong.")],
+            "corrected": None,
+        }]
+        context_view_basis = {
+            "source_modules": ["accuracy", "suggestions"],
+            "merged_view": {
+                "capabilities": ["context.core@1", "context.dialogue@1"]
+            },
+        }
+        packet = build_suggestion_packet(
+            segments,
+            None,
+            results,
+            context_view_basis=context_view_basis,
+        )
+        dependent_tone = tone_decision()
+        dependent_tone["depends_on_dialogue_context"] = True
+        draft = {
+            "schema": DRAFT_SCHEMA,
+            "version": DRAFT_VERSION,
+            "packet_digest": packet["packet_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "worker_receipt": GENERATION_RECEIPT,
+            "selection": packet["selection"],
+            "reviewed_ids": packet["reviewed_ids"],
+            "entries": [{
+                "id": 0,
+                "reference_target": "Follow me home!",
+                "source_semantics": source_semantics(),
+                "tone_decision": dependent_tone,
+            }],
+            "abstained_ids": [],
+            "abstention_reasons": [],
+        }
+
+        artifact = build_candidate_artifact(packet, draft, segments)
+
+        self.assertEqual(
+            artifact["routes"][0]["risk_route"],
+            "hard_reject",
+        )
+        self.assertIn(
+            "DIALOGUE_CONTEXT_INCOMPLETE",
+            artifact["routes"][0]["reason_codes"],
         )
 
     def test_full_mode_includes_minor_candidates(self):

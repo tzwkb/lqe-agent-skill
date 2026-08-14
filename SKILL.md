@@ -102,6 +102,17 @@ python "$SCRIPTS/lqe_io.py" read \
   --out "jobs/<文件名>/state.json"
 ```
 
+客户没有逐句情境时，不得让模型补猜。先从已有 v2 job（包括 shadow job）生成缺口报告和人工待补模板：
+
+```bash
+python "$SCRIPTS/lqe_context_overrides.py" gaps \
+  --state "$JOB/state.json" --out "$JOB/context_gap_report.json"
+python "$SCRIPTS/lqe_context_overrides.py" scaffold \
+  --state "$JOB/state.json" --out "$JOB/context_overrides.template.json"
+```
+
+模板中的未知值固定为 `null`、条目状态为 `pending`。由客户、PM 或其他明确授权来源填写后，删除不适用字段，将条目改为 `verified`，再用 `--context-overrides <已核实.json>` 新建 job。sidecar 只能写当前正式 `foundation`/`enforce` capability 字段，不能绕过 shadow 隔离。已有别名需要人工改为 canonical ID 时，模板在 `expected_context` 保存当前原值；程序只在原值仍精确一致时替换，否则视为漂移冲突。key 重复、源文摘要漂移、无授权/未核实、空值、未声明字段、未声明的已有值替换或补完后仍缺必填上下文时整批失败，原输入和原 job 不修改。成功时复制 sidecar，生成 `context_gap_report.json`，并把摘要绑定到 state、source manifest、segment revision 与 context runtime fingerprint。报告明确区分 `not_provided`、`unresolved_alias`、`ambiguous_alias` 和 `not_applicable`。
+
 旧 `.xls` 通过 `xlrd>=2.0` 只读；corrected 固定输出 `.xlsx`。多工作表用 `--sheet` 明确主表。需要上下文时用 `--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`、`--relationship-stage-col`、`--scene-id-col`、`--scene-tone-col`、`--context-note-col`。程序只采用 profile 已声明并成功协商的能力；`shadow` 仅留审计资料，`enforce` 才影响模块 packet、去重和建议。
 
 SDLXLIFF 初始化：
@@ -377,11 +388,12 @@ references/suggestions.md
 python "$SCRIPTS/lqe_chunk.py" split \
   --state "$JOB/state.json" \
   --errors "$JOB/errors_precheck.json" \
-  --outdir "$JOB/chunks" \
-  --size 100
+  --outdir "$JOB/chunks"
 ```
 
 `split` 会从 state 读取当前模式允许的术语，按相同源文和译文去重、过滤被更长术语覆盖的命中、保留术语候选标记，并为每段写 `kind`。标准模式可用 `--terms <file>` 显式覆盖术语源；无术语模式禁止该参数。密集内容可加 `--char-budget N`。
+
+未显式传 `--size` 时，`context_pipeline.mode=enforce` 默认每块最多 5 段，`off`/`shadow` 保持 100 段；显式 `--size` 始终优先。该默认值为富上下文预留 worker 输入预算，`prepare` 仍按 100,000 字节硬上限校验；单段仍超限时失败，不截断资料。
 
 默认紧接着生成低成本模块输入，并自动发布无需 AI 的确定性空结果：
 
@@ -390,9 +402,9 @@ python "$SCRIPTS/lqe_review.py" prepare --job "$JOB"
 python "$SCRIPTS/lqe_review.py" auto-publish --job "$JOB"
 ```
 
-`prepare` 在 `review_packets/<module>/` 生成与当前 split generation 绑定的模块专用 packet，并写出 `batch_plan.json` 和 `cost_report.json`。非术语模块不携带术语和预检冗余；受保护段不进入任何 packet；`precheck_review` 只携带其负责类别的已有预检。正式 chunk 保持不变。packet 的 `requires_ai: false` 只能来自这些确定性空结果，`auto-publish` 不处理仍需判断的 packet。
+`prepare` 在 `review_packets/<module>/` 生成与当前 split generation 绑定的模块专用 packet，并写出 `batch_plan.json`、`cost_report.json` 和 `selected_evidence_index.json`。该索引逐模块、逐句段记录 checker 实际选中的人物事实、关系、示例、约束和相邻句证据；后续建议阶段只能取这些实际选择的严格并集。非术语模块不携带术语和预检冗余；受保护段不进入任何 packet；`precheck_review` 只携带其负责类别的已有预检。正式 chunk 保持不变。packet 的 `requires_ai: false` 只能来自这些确定性空结果，`auto-publish` 不处理仍需判断的 packet。
 
-当前 v2 job 还会为每个批次生成 `review_packets/context/<module>/batch_NN/bundle_set.json` 与 `worker_manifest.json`。worker 必须同时读取本批 packet、context bundle set、共享资料索引和 manifest 中列出的 SG/背景/确认规则/语言说明；只有 profile 已声明、能力协商已启用且摘要一致的资料可见。资料缺失、过期、越权、超过字节预算或不能完整投影时失败，不截断后继续。
+当前 v2 job 还会为每个批次生成 `review_packets/context/<module>/batch_NN/bundle_set.json` 与 `worker_manifest.json`。worker 必须同时读取本批 packet、context bundle set、共享资料索引和 manifest 中列出的 SG/背景/确认规则/语言说明；每份可读资料必须使用可安全解析的 `job_relative`、`skill_relative` 或 `embedded_text` locator，并核对摘要、字节数及 100,000 字节总预算。checker 不交付 `references/suggestions.md`，其 `instructions.suggestions` 为 `null`；该文件只交付给 `module=suggestions`。完整 project source manifest 由 runtime 实时校验和绑定，checker 只接收已计入预算的 canonical compact projection，不读取审计 manifest 全文。只有 profile 已声明、能力协商已启用且摘要一致的资料可见。资料缺失、过期、越权、locator 不安全、超过字节预算或不能完整投影时失败，不截断后继续。
 
 必需输出由 `state.check_scope` 决定：
 
@@ -410,7 +422,7 @@ chunk_NN.grammar.json
 chunk_NN.naturalness.json
 ```
 
-按 `batch_plan.json` 的模块与批次启动 worker；同一 worker 不得跨批次。每个 worker 处理本批次全部 `requires_ai: true` 的 packet。草稿中的 `reviewed_ids` 必须完整复制 packet 的同名数组；`findings` 只写有问题的 id：
+按 `batch_plan.json` 的模块与批次启动 worker；同一 worker 不得跨批次。每个 worker 处理本批次全部 `requires_ai: true` 的 packet。草稿中的 `reviewed_ids` 必须完整复制 packet 的同名数组；`findings` 只写有问题的 id。`worker_receipt` 必须填写实际 checker worker 身份和本次唯一 run id，不得伪造或复用：
 
 ```json
 {
@@ -423,6 +435,9 @@ chunk_NN.naturalness.json
   "worker_packet_basis_digest": "<packet.worker_packet_basis_digest>",
   "context_bundle_set_digest": "<packet.context_bundle_set_digest>",
   "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
+  "selected_evidence_index_path": "<packet.selected_evidence_index_path>",
+  "selected_evidence_index_digest": "<packet.selected_evidence_index_digest>",
+  "worker_receipt": {"worker_id": "<actual-checker-worker>", "run_id": "<unique-run>"},
   "reviewed_ids": [0, 1, 2],
   "findings": [
     {
@@ -449,7 +464,7 @@ python "$SCRIPTS/lqe_review.py" publish \
   --input <紧凑草稿.json>
 ```
 
-publisher 会从当前正式 chunk 重新派生 packet，拒绝错误 `packet_digest`、缺失审阅 id、空 finding、越权类别、错误预检引用和旧 generation。runtime v1 历史任务只读；`lqe_chunk.py publish-module` 完整数组入口仅保留给当前任务的可选 `proper_names`。packet 超过 30 段时按 `common.md` 每最多 20 个 id 原子更新紧凑草稿。
+publisher 会从当前正式 chunk 重新派生 packet，拒绝错误 `packet_digest`、缺失审阅 id、缺失或非法 `worker_receipt`、空 finding、越权类别、错误预检引用和旧 generation，并把 packet、selected evidence index 与 checker receipt 绑定到正式 publication receipt。runtime v1 历史任务只读；`lqe_chunk.py publish-module` 完整数组入口仅保留给当前任务的可选 `proper_names`。packet 超过 30 段时按 `common.md` 每最多 20 个 id 原子更新紧凑草稿。
 
 结构检查与合并：
 
@@ -609,6 +624,7 @@ jobs/<文件名>/
 ├── errors.json
 ├── chunks/
 ├── review_packets/
+│   ├── selected_evidence_index.json
 │   └── context/<module>/batch_NN/{bundle_set.json,worker_manifest.json}
 ├── suggestion_context/{bundle_set.json,worker_manifest.json}
 ├── reference_suggestions.packet.json

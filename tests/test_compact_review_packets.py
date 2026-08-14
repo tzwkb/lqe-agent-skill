@@ -150,6 +150,16 @@ class CompactReviewPacketTests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "selected_evidence_index_path": packet[
+                "selected_evidence_index_path"
+            ],
+            "selected_evidence_index_digest": packet[
+                "selected_evidence_index_digest"
+            ],
+            "worker_receipt": {
+                "worker_id": f"checker.{packet['module']}",
+                "run_id": f"test.{packet['chunk_id']}",
+            },
             "reviewed_ids": (
                 packet["reviewed_ids"] if reviewed_ids is None else reviewed_ids
             ),
@@ -373,6 +383,84 @@ class CompactReviewPacketTests(unittest.TestCase):
         self.assertFalse(
             (self.job / "chunks" / "chunk_00.grammar.json").exists()
         )
+
+    def test_publish_rejects_noncanonical_edit_evidence(self):
+        prepared = self.prepare()
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        packet = self.packet("grammar")
+        draft = self.job / "grammar.invalid-evidence.json"
+        write_json(
+            draft,
+            self.draft(
+                packet,
+                [
+                    {
+                        "id": 0,
+                        "issues": [
+                            {
+                                "category": "Spelling",
+                                "severity": "Major",
+                                "comment": "The word is misspelled.",
+                                "needs_confirmation": False,
+                                "edit": {
+                                    "from": "eror",
+                                    "to": "error",
+                                    "evidence": {
+                                        "type": "grammar_rule",
+                                        "rule": "en.standard_spelling",
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                ],
+            ),
+        )
+
+        published = self.run_script(
+            REVIEW_SCRIPT,
+            "publish",
+            "--job",
+            self.job,
+            "--chunk",
+            0,
+            "--module",
+            "grammar",
+            "--input",
+            draft,
+        )
+
+        self.assertNotEqual(published.returncode, 0)
+        self.assertIn("invalid correction contract", published.stderr)
+        self.assertIn("evidence has invalid fields", published.stderr)
+        self.assertFalse(
+            (self.job / "chunks" / "chunk_00.grammar.json").exists()
+        )
+
+    def test_publish_requires_checker_worker_receipt(self):
+        prepared = self.prepare()
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        packet = self.packet("grammar")
+        payload = self.draft(packet, [])
+        del payload["worker_receipt"]
+        draft = self.job / "grammar.missing-worker-receipt.json"
+        write_json(draft, payload)
+
+        published = self.run_script(
+            REVIEW_SCRIPT,
+            "publish",
+            "--job",
+            self.job,
+            "--chunk",
+            0,
+            "--module",
+            "grammar",
+            "--input",
+            draft,
+        )
+
+        self.assertNotEqual(published.returncode, 0)
+        self.assertIn("worker_receipt is required", published.stderr)
 
     def test_publish_rejects_incomplete_review_proof(self):
         prepared = self.prepare()

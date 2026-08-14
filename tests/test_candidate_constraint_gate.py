@@ -23,6 +23,32 @@ from lqe_suggestions import (
 PROVIDER = {"id": "ko.register", "api_version": 1}
 
 
+def source_semantics():
+    return {
+        "subjects": ["speaker"],
+        "actions": ["command"],
+        "objects": ["addressee"],
+        "negation": {"present": False, "scope": None},
+        "polarity": "affirmative",
+        "modality": ["imperative"],
+        "speech_act": "command",
+        "text_function": "direct",
+        "intensity": "strong",
+        "omitted_source_elements": [],
+        "unsupported_additions": [],
+    }
+
+
+def tone_decision():
+    return {
+        "register": "plain",
+        "politeness": "non-honorific",
+        "depends_on_dialogue_context": False,
+        "evidence": [{"type": "source_form", "value": "imperative"}],
+        "uncertainties": [],
+    }
+
+
 def register_constraint():
     rules = {
         "schema": "lqe.context-rules",
@@ -87,10 +113,20 @@ def packet_and_draft(reference_target, *, corrected=None):
         "worker_context_manifest_digest": packet[
             "worker_context_manifest_digest"
         ],
+        "worker_receipt": {
+            "worker_id": "generation-worker",
+            "run_id": "generation-run",
+        },
         "selection": packet["selection"],
         "reviewed_ids": packet["reviewed_ids"],
-        "entries": [{"id": 0, "reference_target": reference_target}],
+        "entries": [{
+            "id": 0,
+            "reference_target": reference_target,
+            "source_semantics": source_semantics(),
+            "tone_decision": tone_decision(),
+        }],
         "abstained_ids": [],
+        "abstention_reasons": [],
     }
     return segments, packet, draft
 

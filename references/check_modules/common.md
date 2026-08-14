@@ -8,14 +8,15 @@
 - `confirmed_rules.md`：客户已经确认的规则，优先于风格指南和通用规则。
 - 风格指南与语言说明。
 - 当前模块的 `review_packets/<module>/chunk_NN.json`。packet 只保留该模块所需字段，并绑定原 chunk 的指纹。
-- 当前 batch 的 `review_packets/context/<module>/batch_NN/worker_manifest.json` 及其列出的全部资料、instructions 与 `bundle_set.json`。缺一项、摘要不符或总输入超限时不得开始审校。
+- 当前 batch 的 `review_packets/context/<module>/batch_NN/worker_manifest.json` 与 `bundle_set.json`。manifest 中每份可读资料必须通过 `job_relative`、`skill_relative` 或 `embedded_text` locator 取得，并核对摘要和字节数；缺一项、locator 不可安全解析、摘要不符或总输入超限时不得开始审校。packet 只复制 `selected_evidence_index.json` 的路径和摘要作后续交接证明；checker 不把全局索引重复载入本批输入。
+- checker 的 `instructions.suggestions` 固定为 `null`，不得读取建议生成说明。完整 project source manifest 只由 runtime 实时校验；worker 仅读取 manifest 内预算已计入的 canonical compact projection（项目、coverage、source/generated id、kind、authority/availability 等审计字段），不得加载其原始全文。
 - packet 中的 `review_policy`。`mode=optimized` 执行降本规则，`mode=full` 执行完整规则；不得自行切换。
 
 按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 只处理一个批次：最多 4 个 packet，同时不超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。不可再拆的最小单元仍超限时失败，不截断。worker 在批次开始时读取本文件、自己的模块说明和项目上下文；新批次必须新建 worker并重新读取。发生上下文压缩、异常重复判断或连续格式错误时立即重开，不得依赖上一 worker 的记忆作为证据。
 
 ## 默认紧凑草稿
 
-模型只写合法 JSON 对象草稿，不加 Markdown 围栏或说明文字；不要直接覆盖正式的 `chunk_NN.<module>.json`。`reviewed_ids` 必须原样复制 packet 的同名数组，证明 packet 中全部可审段已覆盖；`findings` 只写确有问题的 id，无问题的 id 不写。
+模型只写合法 JSON 对象草稿，不加 Markdown 围栏或说明文字；不要直接覆盖正式的 `chunk_NN.<module>.json`。`reviewed_ids` 必须原样复制 packet 的同名数组，证明 packet 中全部可审段已覆盖；`findings` 只写确有问题的 id，无问题的 id 不写。`worker_receipt.worker_id` 填实际 checker worker 身份，`run_id` 填本次执行的唯一标识；不得伪造、复用其他 worker，或让后续建议生成 worker 使用同一身份。
 
 ```json
 {
@@ -28,6 +29,9 @@
   "worker_packet_basis_digest": "<packet.worker_packet_basis_digest>",
   "context_bundle_set_digest": "<packet.context_bundle_set_digest>",
   "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
+  "selected_evidence_index_path": "<packet.selected_evidence_index_path>",
+  "selected_evidence_index_digest": "<packet.selected_evidence_index_digest>",
+  "worker_receipt": {"worker_id": "<actual-checker-worker>", "run_id": "<unique-run>"},
   "reviewed_ids": [0, 1, 2],
   "findings": [
     {
@@ -76,7 +80,7 @@
 
 `term_spans` 必须恰有 `source` 和 `target` 两个数组。每个 span 对象恰有整数 `start`、整数 `end` 和非空 `text`，使用 0-based、左闭右开的非空区间；数组按 `(start,end,text)` 升序排列，不得重复或重叠。`text` 必须严格等于对应原文或当前译文的切片，且每个 source span 的 `text` 必须等于 `term_source`。`source` 至少一项；`target` 可为空，表示当前译文没有可安全定位的受影响词（如漏译），不得猜测或整句标记。复核机器预检 Terminology issue 时，必须按 `precheck_ref` 继承 `term_source`、`expected_targets` 和 `term_spans.source`，并在 `term_spans.target` 中精确补充当前译文的问题词；确实没有可标词时保留空数组。新发现的 Terminology issue 由本模块完整提交三个结构化字段。
 
-正式模块结果仍覆盖原 chunk 的全部 id。每个 id 无问题时也输出 `{"id": 0, "issues": []}`；这个补齐动作由 `lqe_review.py publish` 完成。受保护段，以及 `precheck_review` 中没有其负责类别预检的段，会被 packet 确定性排除并补空，不消耗 AI 审阅。
+正式模块结果仍覆盖原 chunk 的全部 id。每个 id 无问题时也输出 `{"id": 0, "issues": []}`；这个补齐动作由 `lqe_review.py publish` 完成。publisher 会把 packet、selected evidence index 和 `worker_receipt` 绑定到正式 module publication receipt。受保护段，以及 `precheck_review` 中没有其负责类别预检的段，会被 packet 确定性排除并补空，不消耗 AI 审阅。
 
 `precheck_review` 保留问题时必须带 chunk 中原问题的 `precheck_ref`；`terminology` 复核并保留机器预检问题时也带该引用，新发现的问题不带。其他模块不使用该字段。
 
@@ -85,6 +89,7 @@
 - `comment` 用英文简短说明，可引用少量原文或译文。
 - `severity` 只能是 `Neutral`、`Minor`、`Major`、`Critical`。
 - `edit` 只表示一个可安全应用的局部替换，必须带 `from`、`to`、`evidence`；同一子串出现多次时再带 `start`、`end`。
+- 任何非空 `edit.evidence` 都必须恰好是 `{"type":"...","source":"...","target":"..."}` 三个非空字符串字段，且 `target` 必须等于 `edit.to`。语法/拼写可用 `type=grammar_rule` 或 `spelling_rule`，`source` 写规则 ID 或可核对的原形；不得自创 `rule`、`explanation` 等额外字段。
 - `optimized`：comment 以 20–30 个字符为软目标，完整、清楚优先，不得机械补字或截断。Minor 只报告问题，必须写非空 `comment`、`needs_confirmation: true` 和 `edit: null`；非 Minor 问题如果改法唯一且安全，才可提交具体 `edit`。
 - `full`：comment 不设字符目标，只要求简明完整。所有严重度（包括 Minor）如果改法唯一且不会碰变量、标签、换行或受保护文本，都可写 `needs_confirmation: false` 和具体 `edit`。
 - 新译名、术语表错误、术语表缺词、多个合理译法或任何无法安全局部修改的问题，写 `needs_confirmation: true` 和 `edit: null`。

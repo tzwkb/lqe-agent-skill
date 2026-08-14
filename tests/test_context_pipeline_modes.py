@@ -706,6 +706,42 @@ class ContextPipelineModeTests(unittest.TestCase):
         )
         self.assertFalse((off_job / "state.json").exists())
 
+    def test_speaker_without_content_type_triggers_only_the_negotiated_projection(self):
+        with self.input_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                ["Key", "Source", "Target", "Content Type", "Speaker", "Addressee"]
+            )
+            writer.writerow(
+                ["business-a", "台词一", "대사 1", "", "speaker-a", "listener-a"]
+            )
+            writer.writerow(
+                ["business-b", "台词二", "대사 2", "", "", ""]
+            )
+
+        _, shadow = self.read_mode("shadow")
+        _, enforce = self.read_mode("enforce")
+
+        self.assertNotIn(
+            "dialogue", shadow["segments"][0]["context"]["extensions"]
+        )
+        self.assertEqual(
+            shadow["segments"][0]["shadow_context"]["extensions"]["dialogue"][
+                "status"
+            ],
+            "ready",
+        )
+        self.assertEqual(
+            enforce["segments"][0]["context"]["extensions"]["dialogue"][
+                "status"
+            ],
+            "ready",
+        )
+        self.assertEqual(
+            enforce["segments"][1]["context"]["extensions"]["dialogue"],
+            {"status": "not_applicable"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@
     "schema",
     "version",
     "module",
+    "projection_modules",
     "segment_revision_digest",
     "project_asset_snapshot_digest",
     "capability_resolution_digest",
@@ -16,7 +17,9 @@
     "relation_ids",
     "resolved_constraints",
     "neighbors",
+    "neighbor_selection",
     "runtime_example_ids",
+    "runtime_example_selection",
     "term_evidence_ids",
     "context_status",
     "context_bundle_digest"
@@ -25,6 +28,12 @@
     "schema": {"const": "lqe.context-bundle"},
     "version": {"const": 1},
     "module": {"$ref": "#/$defs/nonempty"},
+    "projection_modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
     "segment_revision_digest": {"$ref": "#/$defs/sha256"},
     "project_asset_snapshot_digest": {"$ref": "#/$defs/sha256"},
     "capability_resolution_digest": {"$ref": "#/$defs/sha256"},
@@ -69,10 +78,15 @@
       "type": "array",
       "items": {"$ref": "#/$defs/neighbor"}
     },
+    "neighbor_selection": {"$ref": "#/$defs/neighbor_selection"},
     "runtime_example_ids": {
       "type": "array",
       "items": {"$ref": "#/$defs/nonempty"},
       "uniqueItems": true
+    },
+    "runtime_example_selection": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/runtime_example_selection"}
     },
     "term_evidence_ids": {
       "type": "array",
@@ -125,11 +139,12 @@
         "include_constraints": {"type": "boolean"},
         "neighbors": {
           "type": "object",
-          "required": ["before", "after", "include_target"],
+          "required": ["before", "after", "include_target", "boundary_mode"],
           "properties": {
             "before": {"type": "integer", "minimum": 0},
             "after": {"type": "integer", "minimum": 0},
-            "include_target": {"type": "boolean"}
+            "include_target": {"type": "boolean"},
+            "boundary_mode": {"enum": ["same_if_present", "strict"]}
           },
           "additionalProperties": false
         },
@@ -192,6 +207,98 @@
         "context": {"type": "object"},
         "target": {"type": ["string", "null"]},
         "target_status": {"enum": ["omitted", "verified", "unverified"]}
+      },
+      "additionalProperties": false
+    },
+    "neighbor_selection": {
+      "type": "object",
+      "required": [
+        "boundary_mode",
+        "boundary_status",
+        "boundary",
+        "scanned_count",
+        "selected_count"
+      ],
+      "properties": {
+        "boundary_mode": {"enum": ["same_if_present", "strict"]},
+        "boundary_status": {
+          "enum": [
+            "disabled",
+            "bounded",
+            "fallback_no_boundary",
+            "strict_missing_boundary"
+          ]
+        },
+        "boundary": {
+          "type": "object",
+          "properties": {
+            "scene_id": {"$ref": "#/$defs/nonempty"},
+            "group_id": {"$ref": "#/$defs/nonempty"}
+          },
+          "additionalProperties": false
+        },
+        "scanned_count": {"type": "integer", "minimum": 0},
+        "selected_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "runtime_example_selection": {
+      "type": "object",
+      "required": [
+        "example_id",
+        "rank",
+        "scope",
+        "selection_reason",
+        "segment_key_match",
+        "content_type",
+        "matched_capabilities",
+        "matched_dimensions",
+        "lexical_overlap"
+      ],
+      "properties": {
+        "example_id": {"$ref": "#/$defs/nonempty"},
+        "rank": {"type": "integer", "minimum": 1},
+        "scope": {"enum": ["segment", "content_type", "capability", "project"]},
+        "selection_reason": {
+          "enum": ["exact_segment_key", "lexical_overlap", "content_type_fallback"]
+        },
+        "segment_key_match": {"type": "boolean"},
+        "content_type": {
+          "oneOf": [
+            {"$ref": "#/$defs/nonempty"},
+            {"type": "null"}
+          ]
+        },
+        "matched_capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "matched_dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "lexical_overlap": {
+          "type": "object",
+          "required": [
+            "score_ppm",
+            "intersection_count",
+            "union_count",
+            "source_unit_count",
+            "example_unit_count"
+          ],
+          "properties": {
+            "score_ppm": {"type": "integer", "minimum": 0, "maximum": 1000000},
+            "intersection_count": {"type": "integer", "minimum": 0},
+            "union_count": {"type": "integer", "minimum": 0},
+            "source_unit_count": {"type": "integer", "minimum": 0},
+            "example_unit_count": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     }

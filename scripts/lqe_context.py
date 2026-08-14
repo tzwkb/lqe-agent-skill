@@ -591,6 +591,12 @@ def _descriptor_applies(
 ) -> bool:
     if capability_id == CORE_CAPABILITY_ID:
         return True
+    present_fields = descriptor.get("applies_if_present", [])
+    if any(
+        _nonempty(_condition_value(field_ref, values, registry))
+        for field_ref in present_fields
+    ):
+        return True
     conditions = descriptor.get("applies_when", {})
     if conditions:
         for field_ref, accepted in conditions.items():
@@ -740,14 +746,21 @@ def _extension_state(
 
 
 def _selected_context_fields(
-    context_state: Mapping, module: str, registry: Mapping[str, dict]
+    context_state: Mapping,
+    modules: Sequence[str],
+    registry: Mapping[str, dict],
 ) -> tuple[dict, set[str]]:
     raw_core = context_state.get("core", {})
     raw_core = raw_core if isinstance(raw_core, Mapping) else {}
     output = {"core": {}, "extensions": {}}
     selected_refs = set()
     for capability_id, descriptor in registry.items():
-        selected = descriptor.get("module_views", {}).get(module, [])
+        selected = []
+        module_views = descriptor.get("module_views", {})
+        for module in modules:
+            for field_name in module_views.get(module, []):
+                if field_name not in selected:
+                    selected.append(field_name)
         if not selected:
             continue
         if capability_id == CORE_CAPABILITY_ID:
@@ -776,11 +789,39 @@ def project_context_for_module(
     *,
     include_provenance: bool = False,
 ) -> dict:
+    return project_context_for_modules(
+        context_state,
+        [module],
+        registry,
+        include_provenance=include_provenance,
+    )
+
+
+def project_context_for_modules(
+    context_state: Mapping,
+    modules: Sequence[str],
+    registry: Mapping[str, dict] | None = None,
+    *,
+    include_provenance: bool = False,
+) -> dict:
     if not isinstance(context_state, Mapping):
         raise ContextContractError("context state must be an object")
+    if not isinstance(modules, Sequence) or isinstance(modules, (str, bytes)):
+        raise ContextContractError("projection modules must be an array")
+    normalized_modules = []
+    for module in modules:
+        if not isinstance(module, str) or not module.strip():
+            raise ContextContractError(
+                "projection modules must contain non-empty strings"
+            )
+        module = module.strip()
+        if module not in normalized_modules:
+            normalized_modules.append(module)
+    if not normalized_modules:
+        raise ContextContractError("projection modules must not be empty")
     registry = dict(registry or builtin_descriptor_registry())
     projection, selected_refs = _selected_context_fields(
-        context_state, module, registry
+        context_state, normalized_modules, registry
     )
     if include_provenance:
         raw = context_state.get("provenance", {})
@@ -944,6 +985,7 @@ __all__ = [
     "parse_context_col",
     "parse_context_columns",
     "project_context_for_module",
+    "project_context_for_modules",
     "project_segment_for_module",
     "required_context_fields",
     "resolve_context_columns",

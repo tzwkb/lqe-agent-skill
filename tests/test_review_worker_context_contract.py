@@ -13,6 +13,10 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import lqe_review
+from lqe_context_bundle import (
+    validate_selected_context_evidence_index,
+    verify_worker_context_manifest_resources,
+)
 
 
 def asset(kind: str, path: str) -> dict:
@@ -136,6 +140,19 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
         plan = json.loads(
             (job / "review_packets" / "batch_plan.json").read_text(encoding="utf-8")
         )
+        evidence_index = json.loads(
+            (job / "review_packets" / "selected_evidence_index.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            validate_selected_context_evidence_index(evidence_index),
+            evidence_index,
+        )
+        self.assertEqual(
+            plan["selected_evidence_index_digest"],
+            evidence_index["index_digest"],
+        )
         batches = plan["modules"]["accuracy"]
         self.assertGreater(len(batches), 1)
         self.assertEqual(sum(batch["packet_count"] for batch in batches), 4)
@@ -149,6 +166,13 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
             self.assertTrue(bundle_path.is_file())
             self.assertTrue(manifest_path.is_file())
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                verify_worker_context_manifest_resources(
+                    manifest,
+                    job_root=job,
+                ),
+                manifest,
+            )
             self.assertEqual(
                 manifest["worker_context_manifest_digest"],
                 batch["worker_context_manifest_digest"],
@@ -168,6 +192,10 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
                     packet["worker_context_manifest_digest"],
                     batch["worker_context_manifest_digest"],
                 )
+                self.assertEqual(
+                    packet["selected_evidence_index_digest"],
+                    evidence_index["index_digest"],
+                )
 
         report = json.loads(
             (job / "review_packets" / "cost_report.json").read_text(encoding="utf-8")
@@ -182,6 +210,25 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
             ),
         )
         self.assertLessEqual(report["max_worker_input_bytes"], 100_000)
+        accuracy_bundle_digests = {
+            bundle["context_bundle_digest"]
+            for batch in batches
+            for bundle in json.loads(
+                (
+                    job
+                    / "review_packets"
+                    / batch["context_bundle_set_path"]
+                ).read_text(encoding="utf-8")
+            )["bundles"]
+        }
+        self.assertEqual(
+            {
+                entry["context_bundle_digest"]
+                for entry in evidence_index["entries"]
+                if entry["module"] == "accuracy"
+            },
+            accuracy_bundle_digests,
+        )
 
     def test_unprofiled_job_has_empty_assets_and_foundation_bindings(self):
         input_path = self.root / "unprofiled.csv"
@@ -238,6 +285,13 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "selected_evidence_index_path": packet[
+                "selected_evidence_index_path"
+            ],
+            "selected_evidence_index_digest": packet[
+                "selected_evidence_index_digest"
+            ],
+            "worker_receipt": {"worker_id": "checker.accuracy", "run_id": "run.1"},
             "reviewed_ids": packet["reviewed_ids"],
             "findings": [],
         }
@@ -274,6 +328,19 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
             draft_path,
         )
         self.assertEqual(published.returncode, 0, published.stderr)
+        receipt = json.loads(
+            (job / "chunks" / "chunk_00.accuracy.receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            receipt["review_provenance"]["worker_receipt"],
+            draft["worker_receipt"],
+        )
+        self.assertEqual(
+            receipt["review_provenance"]["selected_evidence_index_digest"],
+            packet["selected_evidence_index_digest"],
+        )
 
     def test_publish_rejects_missing_or_tampered_prepared_context(self):
         job = self.build_job([100])
@@ -296,6 +363,13 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
             "worker_context_manifest_digest": packet[
                 "worker_context_manifest_digest"
             ],
+            "selected_evidence_index_path": packet[
+                "selected_evidence_index_path"
+            ],
+            "selected_evidence_index_digest": packet[
+                "selected_evidence_index_digest"
+            ],
+            "worker_receipt": {"worker_id": "checker.accuracy", "run_id": "run.2"},
             "reviewed_ids": packet["reviewed_ids"],
             "findings": [],
         }
@@ -356,6 +430,16 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
                     "worker_context_manifest_digest": packet[
                         "worker_context_manifest_digest"
                     ],
+                    "selected_evidence_index_path": packet[
+                        "selected_evidence_index_path"
+                    ],
+                    "selected_evidence_index_digest": packet[
+                        "selected_evidence_index_digest"
+                    ],
+                    "worker_receipt": {
+                        "worker_id": "checker.accuracy",
+                        "run_id": "run.3",
+                    },
                     "reviewed_ids": packet["reviewed_ids"],
                     "findings": [],
                 }

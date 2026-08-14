@@ -46,6 +46,8 @@ def state_reference_paths(state: dict) -> dict[str, Path]:
         "tm_candidates_path",
         "capability_resolution_path",
         "project_asset_snapshot_path",
+        "context_overrides_path",
+        "context_gap_report_path",
     )
     for field in single_fields:
         value = state.get(field)

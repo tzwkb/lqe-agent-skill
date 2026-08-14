@@ -186,6 +186,16 @@ def state_revision_payload(state: dict) -> dict:
         "project_asset_snapshot_digest": state.get(
             "project_asset_snapshot_digest"
         ),
+        "context_overrides_digest": state.get("context_overrides_digest"),
+        "context_overrides_fingerprint": state.get(
+            "context_overrides_fingerprint"
+        ),
+        "context_runtime_fingerprint": state.get(
+            "context_runtime_fingerprint"
+        ),
+        "context_gap_report_digest": state.get(
+            "context_gap_report_digest"
+        ),
         "context_pipeline": deepcopy(state.get("context_pipeline")),
         "module_context_views": deepcopy(
             state.get("module_context_views", {})
@@ -204,6 +214,8 @@ def state_revision_payload(state: dict) -> dict:
                 "tabular_source_manifest_path",
                 "source_manifest_path",
                 "project_source_manifest_path",
+                "context_overrides_path",
+                "context_gap_report_path",
             )
             if state.get(key) is not None
         },

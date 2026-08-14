@@ -56,7 +56,7 @@ _MODULE_CONTEXT_VIEW_KEYS = frozenset(
     }
 )
 _MODULE_CONTEXT_NEIGHBOR_KEYS = frozenset(
-    {"before", "after", "include_target"}
+    {"before", "after", "include_target", "boundary_mode"}
 )
 _MODULE_CONTEXT_LIMIT_KEYS = frozenset(
     {"max_facts_per_entity", "max_relations", "max_runtime_examples"}
@@ -89,6 +89,7 @@ _DESCRIPTOR_KEYS = frozenset(
         "version",
         "id",
         "applies_when",
+        "applies_if_present",
         "fields",
         "module_views",
         "comparison_rules",
@@ -197,6 +198,16 @@ def _validate_applies_when(value: object, field: str) -> dict:
             normalized.append(item)
         output[key] = normalized
     return output
+
+
+def _validate_applies_if_present(value: object, field: str) -> list[str]:
+    values = _validate_string_list(value, field)
+    for item in values:
+        if not _FIELD_NAME_RE.fullmatch(item):
+            raise ProfileContractError(
+                f"{field} contains an invalid field reference: {item!r}"
+            )
+    return values
 
 
 def _validate_window_rules(value: object, field: str) -> dict:
@@ -347,6 +358,11 @@ def validate_capability_descriptor(descriptor: object, *, custom: bool = False) 
         output["applies_when"] = _validate_applies_when(
             descriptor["applies_when"], "descriptor.applies_when"
         )
+    if "applies_if_present" in descriptor:
+        output["applies_if_present"] = _validate_applies_if_present(
+            descriptor["applies_if_present"],
+            "descriptor.applies_if_present",
+        )
     if "comparison_rules" in descriptor:
         rules = descriptor["comparison_rules"]
         if not isinstance(rules, dict):
@@ -383,14 +399,23 @@ def _field(
     }
 
 
-def _descriptor(capability_id: str, fields: dict, views: dict) -> dict:
-    return {
+def _descriptor(
+    capability_id: str,
+    fields: dict,
+    views: dict,
+    *,
+    applies_if_present: list[str] | None = None,
+) -> dict:
+    output = {
         "schema": "lqe.context-capability-descriptor",
         "version": 1,
         "id": capability_id,
         "fields": fields,
         "module_views": views,
     }
+    if applies_if_present is not None:
+        output["applies_if_present"] = applies_if_present
+    return output
 
 
 _BUILTIN_DESCRIPTORS_RAW = {
@@ -399,9 +424,10 @@ _BUILTIN_DESCRIPTORS_RAW = {
         {
             "content_type": _field(),
             "context_note": _field(affects=True),
+            "group_id": _field(),
         },
         {
-            module: ["content_type", "context_note"]
+            module: ["content_type", "context_note", "group_id"]
             for module in ("terminology", "accuracy", "grammar", "naturalness", "suggestions")
         },
     ),
@@ -437,6 +463,7 @@ _BUILTIN_DESCRIPTORS_RAW = {
                 "scene_tone",
             ],
         },
+        applies_if_present=["speaker_id"],
     ),
     "context.ui@1": _descriptor(
         "context.ui@1",
@@ -561,7 +588,13 @@ def _validate_capability_config(
             f"capability {capability_id}.config must be an object"
         )
     _check_no_executable_keys(config, context=f"capability {capability_id}.config")
-    allowed = {"columns", "applies_when", "window_rules", "budget"}
+    allowed = {
+        "columns",
+        "applies_when",
+        "applies_if_present",
+        "window_rules",
+        "budget",
+    }
     if capability_id == "context.core@1":
         allowed.add("identity")
     unknown = sorted(set(config) - allowed)
@@ -610,6 +643,11 @@ def _validate_capability_config(
         output["applies_when"] = _validate_applies_when(
             config["applies_when"],
             f"capability {capability_id}.config.applies_when",
+        )
+    if "applies_if_present" in config:
+        output["applies_if_present"] = _validate_applies_if_present(
+            config["applies_if_present"],
+            f"capability {capability_id}.config.applies_if_present",
         )
     if "window_rules" in config:
         output["window_rules"] = _validate_window_rules(
@@ -918,6 +956,14 @@ def _normalize_module_context_views(
                         "must be boolean"
                     )
                 neighbors["include_target"] = include_target
+            if "boundary_mode" in raw_neighbors:
+                boundary_mode = raw_neighbors["boundary_mode"]
+                if boundary_mode not in {"same_if_present", "strict"}:
+                    raise ProfileContractError(
+                        f"profile.module_context_views.{module}.neighbors.boundary_mode "
+                        "must be same_if_present or strict"
+                    )
+                neighbors["boundary_mode"] = boundary_mode
             view["neighbors"] = neighbors
         if "limits" in raw_view:
             raw_limits = raw_view["limits"]
@@ -1052,6 +1098,15 @@ def resolve_capability_descriptor(
     for key in ("applies_when", "window_rules"):
         if key in config:
             output[key] = deepcopy(config[key])
+    if "applies_if_present" in config:
+        output["applies_if_present"] = list(
+            dict.fromkeys(
+                [
+                    *output.get("applies_if_present", []),
+                    *config["applies_if_present"],
+                ]
+            )
+        )
     # identity controls runtime business keys; it is not descriptor metadata.
     if "budget" in config:
         output["runtime_budget"] = deepcopy(config["budget"])

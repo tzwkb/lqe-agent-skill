@@ -341,6 +341,16 @@ class MasterTBModuleContractTests(unittest.TestCase):
                 "worker_context_manifest_digest": packet[
                     "worker_context_manifest_digest"
                 ],
+                "selected_evidence_index_path": packet[
+                    "selected_evidence_index_path"
+                ],
+                "selected_evidence_index_digest": packet[
+                    "selected_evidence_index_digest"
+                ],
+                "worker_receipt": {
+                    "worker_id": f"test-checker.{module}",
+                    "run_id": "chunk-0",
+                },
                 "reviewed_ids": packet["reviewed_ids"],
                 "findings": findings,
             }
