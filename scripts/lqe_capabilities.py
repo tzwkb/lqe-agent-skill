@@ -923,6 +923,24 @@ def _normalize_module_context_views(
                     "must be boolean"
                 )
             view["include_constraints"] = include_constraints
+        else:
+            include_constraints = True
+        selected_capabilities = set(view.get("capabilities", []))
+        language_policies = sorted(
+            capability_id
+            for capability_id in selected_capabilities
+            if capability_id.startswith("language_policy.")
+        )
+        if (
+            language_policies
+            and include_constraints
+            and not view.get("constraint_kinds")
+        ):
+            raise ProfileContractError(
+                f"profile.module_context_views.{module} enables language policy "
+                f"capabilities {language_policies} but does not declare "
+                "constraint_kinds"
+            )
         if "neighbors" in raw_view:
             raw_neighbors = raw_view["neighbors"]
             if not isinstance(raw_neighbors, dict):

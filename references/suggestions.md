@@ -81,9 +81,12 @@
 - `optimized` 优先读取 `content_type`，否则读取 `text_type_context`；缺失或未知时按标准强度。文本功能和语气只能结合正式上下文证据判断，不能从项目或目标语言的词面硬猜。`full` 不因文本类型降低检查。
 - `source_semantics` 同时记录 source→candidate 的漏译检查和 candidate→source 的增译检查。仍有漏项或无来源信息时，不得提交候选。
 - `tone_decision` 必须给出源文或正式上下文证据。只有会实质影响候选措辞且无法规避的不确定性，才写入 `abstained_ids`。
+- 正式 `entries` 表示已完成语气决策的候选，因此 `tone_decision.uncertainties` 必须固定为空数组。缺失字段若已通过不使用未知称谓、代词、关系特定礼貌等级或人物口吻而规避，应在 `evidence` 中说明规避方式，不得把该缺口重复写成 uncertainty；若未知信息仍会改变候选措辞，则不得提交 entry，必须改写到 `abstained_ids` 和 `abstention_reasons`。
 - `depends_on_dialogue_context` 表示“候选措辞是否依赖缺失或冲突的对话信息”，不是“该句是否属于对话”或“对话字段是否齐全”。
 - `speaker_id`、`addressee_ids` 或 `relationship_stage` 缺失本身不是自动弃权条件。若源文形式已经明确 speech act、intensity 或敌意/辱骂强度，且候选不需要选择未知关系、称谓/代词、礼貌等级或 character voice 即可保持这些信息，设 `depends_on_dialogue_context: false`，并引用 `source_form` 证据。
 - 只有缺失或冲突的信息会实质改变候选的 register、politeness、称谓/代词或 character voice 时，才设 `depends_on_dialogue_context: true`；此时不得猜测，必须弃权。publisher 会拒绝在 `dialogue_context_readiness` 非 ready 时提交的此类候选。
+- 源文的礼貌标记首先证明请求、缓和或尊重等语用功能，不自动授权目标语言中的敬语等级、社会语域或特定句尾。目标语形式还必须与 resolved constraints、已验证的人物/关系/场景证据和目标语言说明一致；不得把“礼貌请求”机械改写成统一敬语，也不得把敌对或亲密语气机械软化。
+- 只有 strict union 中带已验证 `scene_id`/`group_id`、关系或场景语气的证据才能支持“同一场景连续口吻”的判断。单纯位置相邻、缺少边界的邻句或相似的 SG 文本类型标签都不能授权语域切换，也不能把一个类型的句尾规则扩大到另一个类型。
 - 必须处理全部 `known_issues`，不是只处理 `trigger_issue_ids`；生成后再检查 Mistranslation、Omission、Addition、语法、自然度和全部 resolved constraints。
 - 变量、标签、换行和保护文本的数量与顺序必须保留。
 - `excluded_segments` 不得重新引入。未解决术语、保护段、输入阻断和约束冲突均不能被其他模块意见绕过。

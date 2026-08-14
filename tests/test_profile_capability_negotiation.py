@@ -211,6 +211,50 @@ class ProfileCapabilityNegotiationTests(unittest.TestCase):
         with self.assertRaisesRegex(ProfileContractError, "non-negative integer"):
             normalize_profile(invalid)
 
+    def test_language_policy_view_requires_explicit_constraint_kinds(self):
+        profile = v2_profile()
+        profile["capabilities"]["language_policy.register@1"] = {
+            "required": False,
+            "provider": "ko.register@1",
+        }
+        profile["module_context_views"] = {
+            "naturalness": {
+                "capabilities": [
+                    "context.core@1",
+                    "language_policy.register@1",
+                ],
+                "dimensions": ["naturalness"],
+            }
+        }
+        with self.assertRaisesRegex(
+            ProfileContractError,
+            "does not declare constraint_kinds",
+        ):
+            normalize_profile(profile)
+
+        declared = deepcopy(profile)
+        declared["module_context_views"]["naturalness"][
+            "constraint_kinds"
+        ] = ["language.register"]
+        normalized = normalize_profile(declared)
+        self.assertEqual(
+            normalized["module_context_views"]["naturalness"][
+                "constraint_kinds"
+            ],
+            ["language.register"],
+        )
+
+        audit_only = deepcopy(profile)
+        audit_only["module_context_views"]["naturalness"][
+            "include_constraints"
+        ] = False
+        normalized = normalize_profile(audit_only)
+        self.assertFalse(
+            normalized["module_context_views"]["naturalness"][
+                "include_constraints"
+            ]
+        )
+
     def test_asset_backed_capability_uses_only_explicit_snapshot_status(self):
         profile = v2_profile()
         profile["assets"]["entities"] = asset(

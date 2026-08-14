@@ -16,9 +16,11 @@
 8. intensity；
 9. source→candidate 是否漏掉条件、范围或其他信息；
 10. candidate→source 是否增添无来源信息；
-11. tone、politeness、register 和 character voice 是否有 source/正式上下文证据。对话字段缺失本身不是失败；若 source 已明确 speech act、intensity 或敌意，且候选没有加入依赖未知关系的称谓、代词、礼貌等级或 character voice，可按 source 证据通过。
+11. tone、politeness、register 和 character voice 是否有 source/正式上下文证据。对话字段缺失本身不是失败；若 source 已明确 speech act、intensity 或敌意，且候选没有加入依赖未知关系的称谓、代词、礼貌等级或 character voice，可按 source 证据通过。源文礼貌标记只证明请求、缓和或尊重等语用功能，不自动证明目标语言必须使用某个敬语等级或句尾；必须另行核对 resolved constraints、已验证的人物/关系/场景证据和目标语言说明。同一已验证 scene/group 内不得无证据切换口吻；缺少场景边界的相邻句不能充当连续性证据。SG 的句尾规则只能按其明确适用的文本类型使用，不得凭相似标签扩大范围。
 
 还要确认全部 `known_issues` 已解决，变量、标签、换行、保护文本和 confirmed constraints 均满足。当前 target 不是候选含义正确的证据。证据不足或需要业务选择时返回 `human_required`。
+
+正式 candidate entry 的 `tone_decision.uncertainties` 必须为空。缺口已被候选规避时，核对其 `evidence` 是否真实说明了规避方式；如果候选仍依赖会改变措辞的未知信息，说明 generation 本应 abstain，verifier 不得用笼统的 tone pass 掩盖该矛盾。
 
 草稿格式：
 

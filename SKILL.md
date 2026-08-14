@@ -82,7 +82,7 @@ projects/<game>/<source>-<target>/
 
 新 profile 使用 `profile_contract_version: 2`，并显式声明 `assets`、`context_pipeline` 和 `capabilities`。资料必须登记路径、类型、权威级别、来源、分发级别和可用状态；程序不会扫描目录并自动启用文件。人物/实体、关系、审核示例、上下文规则、来源清单和逐句人工补充分别使用 `lqe.entities`、`lqe.review-examples`、`lqe.context-rules`、`lqe.project-source-manifest`、`lqe.segment-context-overrides` JSON。原始 xlsx/docx 可保留用于追溯，但不直接充当可执行人物关系或语域规则。
 
-需要向模块提供人物事实、邻句或审核案例时，在 profile 的 `module_context_views` 中按模块声明 capability、dimension、邻句窗口和数量上限。`max_runtime_examples: 0` 表示不提供案例，不是“自动选择”。`off` 不启用 optional view；`shadow` 只把 view 写入 `state.shadow_module_context_views` 供审计；只有 `enforce` 才写入正式 `state.module_context_views`。shadow typed asset 即使声明 core capability，也不得进入正式 bundle、shared assets 或 worker manifest；关系若显式带 `attributes.runtime_rule: false`，不得作为运行上下文。
+需要向模块提供人物事实、邻句或审核案例时，在 profile 的 `module_context_views` 中按模块声明 capability、dimension、邻句窗口和数量上限。模块启用 `language_policy.*` 且需要使用规则结论时，必须同时显式声明对应 `constraint_kinds`；缺失会使 profile 初始化失败，不能静默丢掉已解析规则。`max_runtime_examples: 0` 表示不提供案例，不是“自动选择”。`off` 不启用 optional view；`shadow` 只把 view 写入 `state.shadow_module_context_views` 供审计；只有 `enforce` 才写入正式 `state.module_context_views`。shadow typed asset 即使声明 core capability，也不得进入正式 bundle、shared assets 或 worker manifest；关系若显式带 `attributes.runtime_rule: false`，不得作为运行上下文。
 
 目标语言事实放在 `target_languages/<code>/attributes.json`，语言级检查说明放在 `eval_notes.md`。合并顺序为：内置默认 < 语言属性 < 项目 `checks.json` < CLI 参数。
 
@@ -111,7 +111,7 @@ python "$SCRIPTS/lqe_context_overrides.py" scaffold \
   --state "$JOB/state.json" --out "$JOB/context_overrides.template.json"
 ```
 
-模板中的未知值固定为 `null`、条目状态为 `pending`。由客户、PM 或其他明确授权来源填写后，删除不适用字段，将条目改为 `verified`，再用 `--context-overrides <已核实.json>` 新建 job。sidecar 只能写当前正式 `foundation`/`enforce` capability 字段，不能绕过 shadow 隔离。已有别名需要人工改为 canonical ID 时，模板在 `expected_context` 保存当前原值；程序只在原值仍精确一致时替换，否则视为漂移冲突。key 重复、源文摘要漂移、无授权/未核实、空值、未声明字段、未声明的已有值替换或补完后仍缺必填上下文时整批失败，原输入和原 job 不修改。成功时复制 sidecar，生成 `context_gap_report.json`，并把摘要绑定到 state、source manifest、segment revision 与 context runtime fingerprint。报告明确区分 `not_provided`、`unresolved_alias`、`ambiguous_alias` 和 `not_applicable`。
+模板中的未知值固定为 `null`、条目状态为 `pending`。由客户、PM 或其他明确授权来源填写后，删除不适用字段，将条目改为 `verified`，再用 `--context-overrides <已核实.json>` 新建 job。sidecar 只能写当前正式 `foundation`/`enforce` capability 字段，不能绕过 shadow 隔离。已有别名需要人工改为 canonical ID 时，模板在 `expected_context` 保存当前原值；程序只在原值仍精确一致时替换，否则视为漂移冲突。key 重复、源文摘要漂移、无授权/未核实、空值、未声明字段、未声明的已有值替换或补完后仍缺必填上下文时整批失败，原输入和原 job 不修改。成功时复制 sidecar，生成 `context_gap_report.json`，并把摘要绑定到 state、source manifest、segment revision 与 context runtime fingerprint。运行顺序固定为项目 canonical segment override、本任务已核实 sidecar、语言/语域规则；因此规则只能基于本轮实际绑定的场景、受话人、关系阶段和语气作出结论。报告明确区分 `not_provided`、`unresolved_alias`、`ambiguous_alias` 和 `not_applicable`。
 
 旧 `.xls` 通过 `xlrd>=2.0` 只读；corrected 固定输出 `.xlsx`。多工作表用 `--sheet` 明确主表。需要上下文时用 `--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`、`--relationship-stage-col`、`--scene-id-col`、`--scene-tone-col`、`--context-note-col`。程序只采用 profile 已声明并成功协商的能力；`shadow` 仅留审计资料，`enforce` 才影响模块 packet、去重和建议。
 
@@ -501,7 +501,7 @@ python "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 
 参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段或约束冲突时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
 
-建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。缺少说话人、受话人或关系字段本身不触发弃权：若源文已明确 speech act、强度或敌意，且候选无需选择未知关系、称谓、代词、礼貌等级或角色口吻即可忠实表达，应继续生成并引用源文证据；只有缺失信息会实质改变候选措辞时才弃权。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
+建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。缺少说话人、受话人或关系字段本身不触发弃权：若源文已明确 speech act、强度或敌意，且候选无需选择未知关系、称谓、代词、礼貌等级或角色口吻即可忠实表达，应继续生成并引用源文证据；只有缺失信息会实质改变候选措辞时才弃权。正式候选的 `tone_decision.uncertainties` 必须为空：已通过中性措辞规避的缺口写进 evidence；仍会改变译文的未知信息必须转为 abstain，不能把带不确定性的候选交给后续发布。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
 
 一键收尾：
 

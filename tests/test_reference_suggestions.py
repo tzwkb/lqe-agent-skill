@@ -498,6 +498,81 @@ class ReferenceSuggestionContractTests(unittest.TestCase):
             }],
         )
 
+    def test_formal_candidate_rejects_nonempty_tone_uncertainties(self):
+        segments = [{"id": 0, "source": "Source", "target": "Target"}]
+        results = [{
+            "id": 0,
+            "errors": [issue("The register needs review.")],
+            "corrected": None,
+        }]
+        packet = build_suggestion_packet(segments, None, results)
+        unresolved_tone = tone_decision()
+        unresolved_tone["uncertainties"] = [
+            "The missing relationship could change the wording."
+        ]
+        draft = {
+            "schema": DRAFT_SCHEMA,
+            "version": DRAFT_VERSION,
+            "packet_digest": packet["packet_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "worker_receipt": GENERATION_RECEIPT,
+            "selection": packet["selection"],
+            "reviewed_ids": packet["reviewed_ids"],
+            "entries": [{
+                "id": 0,
+                "reference_target": "Candidate",
+                "source_semantics": source_semantics(),
+                "tone_decision": unresolved_tone,
+            }],
+            "abstained_ids": [],
+            "abstention_reasons": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "uncertainties"):
+            validate_generation_draft(draft, packet)
+
+    def test_wording_dependent_tone_uncertainty_uses_abstention(self):
+        segments = [{"id": 0, "source": "Source", "target": "Target"}]
+        results = [{
+            "id": 0,
+            "errors": [issue("The register needs review.")],
+            "corrected": None,
+        }]
+        packet = build_suggestion_packet(segments, None, results)
+        draft = {
+            "schema": DRAFT_SCHEMA,
+            "version": DRAFT_VERSION,
+            "packet_digest": packet["packet_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "worker_receipt": GENERATION_RECEIPT,
+            "selection": packet["selection"],
+            "reviewed_ids": packet["reviewed_ids"],
+            "entries": [],
+            "abstained_ids": [0],
+            "abstention_reasons": [{
+                "id": 0,
+                "reason_codes": ["REGISTER_CONTEXT_REQUIRED"],
+                "evidence": "The unresolved relationship changes the target wording.",
+            }],
+        }
+
+        artifact = build_candidate_artifact(packet, draft, segments)
+
+        self.assertEqual(artifact["entries"], [])
+        self.assertEqual(artifact["routes"][0]["risk_route"], "hard_reject")
+        self.assertEqual(
+            artifact["routes"][0]["reason_codes"],
+            ["WORKER_ABSTAINED", "REGISTER_CONTEXT_REQUIRED"],
+        )
+        self.assertNotIn(
+            "TONE_DECISION_UNCERTAIN",
+            artifact["routes"][0]["reason_codes"],
+        )
+
     def test_source_explicit_tone_can_proceed_when_dialogue_context_is_incomplete(self):
         segments = [{
             "id": 0,
@@ -579,6 +654,10 @@ class ReferenceSuggestionContractTests(unittest.TestCase):
         )
         self.assertNotIn(
             "DIALOGUE_CONTEXT_INCOMPLETE",
+            artifact["routes"][0].get("reason_codes", []),
+        )
+        self.assertNotIn(
+            "TONE_DECISION_UNCERTAIN",
             artifact["routes"][0].get("reason_codes", []),
         )
 

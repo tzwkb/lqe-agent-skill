@@ -124,7 +124,7 @@ python3 "$SCRIPTS/lqe_context_overrides.py" scaffold \
   --state "$JOB/state.json" --out "$JOB/context_overrides.template.json"
 ```
 
-人工或授权来源核实后，用 `read --context-overrides <已核实.json>` 新建 job。sidecar 不能绕过 shadow；key、源文摘要、授权、字段声明、冲突和必填上下文全部整批校验。歧义别名的模板会在 `expected_context` 记录当前原值，只有原值仍精确一致时才允许替换为人工确认的 canonical ID。通过后，sidecar、缺口报告及其 fingerprint 同时绑定进 state 和 source manifest；失败不修改原输入或原 job。缺口状态区分 `not_provided`、`unresolved_alias`、`ambiguous_alias` 和 `not_applicable`。
+人工或授权来源核实后，用 `read --context-overrides <已核实.json>` 新建 job。sidecar 不能绕过 shadow；key、源文摘要、授权、字段声明、冲突和必填上下文全部整批校验。歧义别名的模板会在 `expected_context` 记录当前原值，只有原值仍精确一致时才允许替换为人工确认的 canonical ID。通过后，sidecar、缺口报告及其 fingerprint 同时绑定进 state 和 source manifest；失败不修改原输入或原 job。运行顺序固定为项目 canonical segment override、本任务已核实 sidecar、语言/语域规则，因此规则只能依据当前 job 已绑定的情境作出结论。缺口状态区分 `not_provided`、`unresolved_alias`、`ambiguous_alias` 和 `not_applicable`。
 
 任务明确不检查术语和专名时，在 `read` 中加入 `--no-terminology`。该参数覆盖 profile 术语配置，且不能与显式 `--terminology <file>` 同时使用：
 
@@ -329,7 +329,7 @@ chunk_NN.naturalness.json
 
 新任务同时绑定稳定句段身份、来源证据以及项目资产/能力快照。输入含显式上下文时使用 `--sheet`、`--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`。可选能力只有在 `enforce` 模式才进入正式 packet；`shadow` 写入独立 `shadow_context/context.json`，不进入正式去重、审校、建议或报告。旧 `.xls` 由 `xlrd>=2.0` 只读，corrected 固定输出 `.xlsx`。
 
-profile v2 用 asset registry 声明资料的路径、权威级别、来源和分发范围，并用 capability registry 决定各模块能读取什么。人物、关系、剧情示例和语言规则应使用 canonical JSON 资产；原始 XLSX/DOCX 可保留作溯源，但不会因放在目录里而自动注入。`worker_manifest.json` 通过安全、可核验的 locator 绑定每批 worker 实际读取的 instructions、SG、语言说明、共享资产、context bundle 和 packet。checker 的 `instructions.suggestions` 为 null，只有建议生成 worker 接收该说明；完整 project source manifest 保持 runtime 实时校验，worker 只接收计入预算的 canonical compact projection，不读取原始审计全文。`review_packets/selected_evidence_index.json` 逐模块、逐句段记录实际选中的证据，供后续建议阶段取严格并集。总输入上限为 100,000 bytes。
+profile v2 用 asset registry 声明资料的路径、权威级别、来源和分发范围，并用 capability registry 决定各模块能读取什么。人物、关系、剧情示例和语言规则应使用 canonical JSON 资产；模块启用 `language_policy.*` 并消费其结论时，必须同时声明对应 `constraint_kinds`，缺失会直接判 profile 无效，不再静默丢掉已解析规则。原始 XLSX/DOCX 可保留作溯源，但不会因放在目录里而自动注入。`worker_manifest.json` 通过安全、可核验的 locator 绑定每批 worker 实际读取的 instructions、SG、语言说明、共享资产、context bundle 和 packet。checker 的 `instructions.suggestions` 为 null，只有建议生成 worker 接收该说明；完整 project source manifest 保持 runtime 实时校验，worker 只接收计入预算的 canonical compact projection，不读取原始审计全文。`review_packets/selected_evidence_index.json` 逐模块、逐句段记录实际选中的证据，供后续建议阶段取严格并集。总输入上限为 100,000 bytes。
 
 跨 sheet/版本核对使用 `--pivot-sheet`、`--pivot-key-col`、可重复的 `--pivot-compare` 和显式 `--pivot-authority`；同 key 不完整、重复或 authoritative 值冲突会在审校前阻断。历史任务缺 `job_runtime_contract_version: 2` 时只能验证既有产物；续跑需用：
 
@@ -372,7 +372,7 @@ python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 
 `optimized` 默认只将 Major/Critical 放入候选；`full` 默认纳入全部严重度。未解决术语结论、blocked/保护段和约束冲突在生成前直接拒绝；生成后再按候选文本重评已解析约束。明确不匹配的候选硬拒绝，无法确定的候选交给独立 verifier。只有验收通过的候选才能进入 v5 正式建议；candidate、review 或 final 摘要过期均 fail closed。
 
-缺少说话人、受话人或关系字段不等于自动弃权。若源文已经明确 speech act、强度或敌意，且候选不需要选择未知关系、称谓、代词、礼貌等级或角色口吻即可保持这些信息，生成 worker 应引用源文证据继续生成；只有缺失信息会实质改变候选措辞时才弃权。
+缺少说话人、受话人或关系字段不等于自动弃权。若源文已经明确 speech act、强度或敌意，且候选不需要选择未知关系、称谓、代词、礼貌等级或角色口吻即可保持这些信息，生成 worker 应引用源文证据继续生成。正式候选的 `tone_decision.uncertainties` 必须为空：已解决或通过中性表达规避的缺口写入 evidence；仍会改变译文的未知信息必须弃权，不能带着不确定性进入发布链。
 
 首轮检查应明确使用 `single`：
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,7 @@ from lqe_context_overrides import (
 )
 from lqe_profile_ingest import canonical_digest
 from lqe_split_contract import state_fingerprint
+import lqe_io
 
 
 def source_digest(value: str) -> str:
@@ -517,6 +519,283 @@ class ContextOverrideRuntimeTests(unittest.TestCase):
         self.assertFalse((failed_job / "scope.json").exists())
         if failed_job.exists():
             self.assertEqual(list(failed_job.iterdir()), [])
+
+    def test_verified_job_override_is_applied_before_language_rules(self):
+        project = self._write_profile()
+        profile_path = project / "profile.json"
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        context_rules = {
+            "schema": "lqe.context-rules",
+            "version": 1,
+            "authority_rank": ["test"],
+            "rules": [
+                {
+                    "id": "rule.test.hostile_dialogue_plain",
+                    "capability": "language.register",
+                    "provider": {"id": "ko.register", "api_version": 1},
+                    "target_lang": "ko",
+                    "rule_status": "confirmed",
+                    "priority": 100,
+                    "authority": {"issuer": "test"},
+                    "valid_from": None,
+                    "valid_until": None,
+                    "when": {
+                        "content_type": ["dialogue"],
+                        "scene_tone": ["hostile"],
+                    },
+                    "expect": {
+                        "politeness": ["plain"],
+                        "ending_families": ["hae", "haera"],
+                        "forbidden_families": ["haeyo", "hapsyo"],
+                    },
+                    "provenance": {"source_id": "pm.context"},
+                }
+            ],
+        }
+        (project / "context_rules.json").write_text(
+            json.dumps(context_rules, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        profile["assets"]["context_rules"] = {
+            **asset("context_rules", "context_rules.json"),
+            "media_type": "application/json",
+            "content_schema": "lqe.context-rules",
+        }
+        profile["capabilities"]["language_policy.register@1"] = {
+            "required": True,
+            "provider": "ko.register@1",
+            "asset": "context_rules",
+        }
+        for module in ("naturalness", "suggestions"):
+            profile["module_context_views"][module]["capabilities"].append(
+                "language_policy.register@1"
+            )
+            profile["module_context_views"][module]["constraint_kinds"] = [
+                "language.register"
+            ]
+        profile_path.write_text(
+            json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        input_path = self.root / "policy-input.csv"
+        with input_path.open("w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerows(
+                [
+                    ["Key", "Source", "Target"],
+                    ["line-1", "马上离开！", "지금 떠나 주세요!"],
+                ]
+            )
+        segments = [blank_segment(source="马上离开！")]
+        sidecar = verified_sidecar(segments)
+        sidecar["entries"][0]["context_patch"][
+            "context.dialogue@1.scene_tone"
+        ] = "hostile"
+        sidecar_path = self.root / "policy-context.json"
+        sidecar_path.write_text(
+            json.dumps(sidecar, ensure_ascii=False), encoding="utf-8"
+        )
+        job = self.root / "policy-job"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "lqe_io.py"),
+                "read",
+                "--input",
+                str(input_path),
+                "--project",
+                str(project),
+                "--source-col",
+                "Source",
+                "--target-col",
+                "Target",
+                "--key-col",
+                "Key",
+                "--context-overrides",
+                str(sidecar_path),
+                "--no-terminology",
+                "--out",
+                str(job / "state.json"),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        state = json.loads((job / "state.json").read_text(encoding="utf-8"))
+        constraint = state["segments"][0]["resolved_constraints"][0]
+        self.assertEqual(constraint["status"], "resolved")
+        self.assertEqual(
+            constraint["rule_ids"], ["rule.test.hostile_dialogue_plain"]
+        )
+        self.assertEqual(
+            constraint["runtime_evaluation"]["status"], "mismatch"
+        )
+
+    def test_project_then_job_override_then_language_rule_phase_order(self):
+        segment = blank_segment(source="马上离开！")
+        registry = runtime_registry()
+        common = {
+            "context_pipeline": {"mode": "enforce"},
+            "target_lang": "ko",
+            "created_at": "2026-08-14T00:00:00Z",
+            "capability_resolution_digest": "a" * 64,
+            "capability_resolution": {
+                "enabled": {
+                    "source_provenance@1": {"effect": "foundation"},
+                    "context.dialogue@1": {
+                        "effect": "enforce",
+                        "asset": "project_overrides",
+                    },
+                    "language_policy.register@1": {
+                        "effect": "enforce",
+                        "asset": "rules",
+                        "provider": {"id": "ko.register", "api_version": 1},
+                    },
+                }
+            },
+            "project_asset_snapshot": {
+                "assets": {
+                    "source_manifest": {
+                        "kind": "project_source_manifest",
+                        "status": "present",
+                    },
+                    "project_overrides": {
+                        "kind": "segment_context_overrides",
+                        "status": "present",
+                    },
+                    "rules": {"kind": "context_rules", "status": "present"},
+                }
+            },
+            "project_asset_paths": {
+                "source_manifest": str(self.root / "project_sources.json"),
+                "project_overrides": str(self.root / "project_overrides.json"),
+                "rules": str(self.root / "context_rules.json"),
+            },
+        }
+        project_document = {"project": "override"}
+        rules_document = {"rules": "register"}
+
+        def apply_project_override(document, *, segments, **_kwargs):
+            self.assertIs(document, project_document)
+            updated = deepcopy(segments)
+            updated[0]["context"]["core"]["content_type"] = "dialogue"
+            dialogue = updated[0]["context"]["extensions"]["dialogue"]
+            dialogue.update(
+                {
+                    "status": "ready",
+                    "speaker_id": "entity.test.commander",
+                    "scene_tone": "neutral",
+                }
+            )
+            return updated
+
+        evaluated_contexts = []
+
+        def evaluate_rule(_rules, context, _target, **_kwargs):
+            evaluated_contexts.append(deepcopy(context))
+            return {
+                "status": "match",
+                "reason_codes": [],
+                "observation": {},
+                "evaluation": {},
+                "evaluation_digest": "b" * 64,
+                "constraint": {
+                    "status": "resolved",
+                    "rule_ids": ["rule.test.phase_order"],
+                },
+            }
+
+        def read_asset(_path, *, label):
+            if label == "segment_context_overrides":
+                return project_document
+            if label == "context_rules":
+                return rules_document
+            raise AssertionError(label)
+
+        with (
+            patch.object(
+                lqe_io,
+                "load_project_source_manifest",
+                return_value={
+                    "sources": [{"id": "source.context"}],
+                    "manifest_digest": "c" * 64,
+                },
+            ),
+            patch.object(lqe_io, "_read_json_asset", side_effect=read_asset),
+            patch.object(
+                lqe_io,
+                "apply_segment_context_overrides",
+                side_effect=apply_project_override,
+            ),
+            patch.object(
+                lqe_io,
+                "validate_context_rules",
+                return_value=rules_document,
+            ),
+            patch.object(
+                lqe_io,
+                "evaluate_language_policy",
+                side_effect=evaluate_rule,
+            ),
+        ):
+            segments = lqe_io._apply_runtime_project_context(
+                [segment],
+                common,
+                {"profile": True},
+                registry,
+                phase="project_overrides",
+            )
+            self.assertEqual(
+                segments[0]["context"]["extensions"]["dialogue"]["scene_tone"],
+                "neutral",
+            )
+
+            job_sidecar = {
+                "schema": "lqe.job-context-overrides",
+                "version": 1,
+                "segment_set_digest": segment_set_digest(segments),
+                "authority_source": {
+                    "source_id": "pm.context-confirmation.20260814",
+                    "kind": "human",
+                    "issuer": "localization_pm",
+                },
+                "entries": [
+                    {
+                        "segment_key": segments[0]["segment_key"],
+                        "source_digest": segments[0]["source_digest"],
+                        "verification_status": "verified",
+                        "context_patch": {
+                            "context.dialogue@1.scene_tone": "hostile"
+                        },
+                        "expected_context": {
+                            "context.dialogue@1.scene_tone": "neutral"
+                        },
+                        "provenance": {"record_id": "job-override"},
+                    }
+                ],
+            }
+            segments = apply_job_context_overrides(
+                job_sidecar,
+                segments=segments,
+                registry=registry,
+                capability_resolution_digest="a" * 64,
+            )["segments"]
+            segments = lqe_io._apply_runtime_project_context(
+                segments,
+                common,
+                {"profile": True},
+                registry,
+                phase="rules",
+            )
+
+        self.assertEqual(
+            evaluated_contexts[0]["extensions"]["dialogue"]["scene_tone"],
+            "hostile",
+        )
+        self.assertEqual(
+            segments[0]["resolved_constraints"][0]["rule_ids"],
+            ["rule.test.phase_order"],
+        )
 
     def test_sdlxliff_read_accepts_verified_foundation_override(self):
         fixture = ROOT / "tests/fixtures/sdlxliff/multi_segment.sdlxliff"

@@ -1364,9 +1364,12 @@ def _apply_runtime_project_context(
     registry: dict,
     *,
     runtime_asset_paths: dict | None = None,
+    phase: str = "all",
 ) -> list[dict]:
     """Apply only declared, copied canonical assets to the formal context."""
 
+    if phase not in {"all", "project_overrides", "rules"}:
+        raise ValueError(f"unknown project context phase: {phase}")
     if not prof:
         return segments
     mode = (common.get("context_pipeline") or {}).get("mode", "off")
@@ -1408,7 +1411,7 @@ def _apply_runtime_project_context(
         ][manifests[0][0]]
 
     overrides = by_kind.get("segment_context_overrides", [])
-    if overrides:
+    if phase in {"all", "project_overrides"} and overrides:
         if source_ids is None:
             raise ValueError(
                 "segment_context_overrides requires an enabled project_source_manifest"
@@ -1440,7 +1443,7 @@ def _apply_runtime_project_context(
         )
 
     rule_assets = by_kind.get("context_rules", [])
-    if rule_assets:
+    if phase in {"all", "rules"} and rule_assets:
         if len(rule_assets) != 1:
             raise ValueError("only one active context_rules asset is allowed")
         target_lang = common.get("target_lang")
@@ -2194,6 +2197,7 @@ def _read_sdlxliff_job(
             prof,
             context_registry,
             runtime_asset_paths=staged_project_asset_paths,
+            phase="project_overrides",
         )
         (
             result.segments,
@@ -2209,6 +2213,14 @@ def _read_sdlxliff_job(
             staging_dir=staging_dir,
             job_dir=job_dir,
             staged_project_asset_paths=staged_project_asset_paths,
+        )
+        result.segments = _apply_runtime_project_context(
+            result.segments,
+            common,
+            prof,
+            context_registry,
+            runtime_asset_paths=staged_project_asset_paths,
+            phase="rules",
         )
         shadow_context_artifact = None
         if shadow_registry is not None:
@@ -2757,6 +2769,7 @@ def _cmd_read_locked(args):
                 prof,
                 registry,
                 runtime_asset_paths=staged_project_asset_paths,
+                phase="project_overrides",
             )
             (
                 segments,
@@ -2772,6 +2785,14 @@ def _cmd_read_locked(args):
                 staging_dir=staging_dir,
                 job_dir=job_dir,
                 staged_project_asset_paths=staged_project_asset_paths,
+            )
+            segments = _apply_runtime_project_context(
+                segments,
+                common,
+                prof,
+                registry,
+                runtime_asset_paths=staged_project_asset_paths,
+                phase="rules",
             )
 
             for segment in segments:

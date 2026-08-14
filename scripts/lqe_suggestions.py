@@ -2458,6 +2458,11 @@ def _validate_tone_decision(value: object, *, label: str) -> dict:
         )
     ):
         raise ValueError(f"{label}.uncertainties must be a string array")
+    if uncertainties:
+        raise ValueError(
+            f"{label}.uncertainties must be empty for a formal candidate; "
+            "abstain when an unresolved choice would change the wording"
+        )
     return copy.deepcopy(value)
 
 
@@ -2710,9 +2715,6 @@ def _candidate_route(
     if candidate["source_semantics"]["unsupported_additions"]:
         route = HARD_REJECT
         reason_codes.append("GENERATION_REPORTS_UNSUPPORTED_ADDITION")
-    if candidate["tone_decision"]["uncertainties"]:
-        route = HARD_REJECT
-        reason_codes.append("TONE_DECISION_UNCERTAIN")
     readiness = packet_segment.get("dialogue_context_readiness", {})
     if (
         candidate["tone_decision"]["depends_on_dialogue_context"]

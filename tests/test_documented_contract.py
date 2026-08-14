@@ -278,9 +278,64 @@ class DocumentedContractTests(unittest.TestCase):
             "源文形式已经明确",
             "候选不需要选择未知关系",
             "会实质改变候选",
+            "`tone_decision.uncertainties` 必须固定为空数组",
+            "不自动授权目标语言中的敬语等级",
+            "带已验证 `scene_id`/`group_id`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.suggestions)
+
+    def test_all_suggestion_tone_schemas_require_resolved_candidates(self):
+        schema_paths = (
+            "schemas/suggestions/generation_draft.schema.json",
+            "schemas/suggestions/candidates.schema.json",
+            "schemas/suggestions/review_packet.schema.json",
+            "schemas/suggestions/final.schema.json",
+        )
+
+        def tone_definitions(value):
+            found = []
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if (
+                        key == "tone_decision"
+                        and isinstance(child, dict)
+                        and isinstance(child.get("properties"), dict)
+                    ):
+                        found.append(child)
+                    found.extend(tone_definitions(child))
+            elif isinstance(value, list):
+                for child in value:
+                    found.extend(tone_definitions(child))
+            return found
+
+        for relative in schema_paths:
+            with self.subTest(schema=relative):
+                schema = json.loads((ROOT / relative).read_text(encoding="utf-8"))
+                definitions = tone_definitions(schema)
+                self.assertTrue(definitions)
+                for definition in definitions:
+                    self.assertEqual(
+                        definition["properties"]["uncertainties"]["maxItems"],
+                        0,
+                    )
+
+    def test_register_guidance_separates_pragmatics_from_social_register(self):
+        review = (ROOT / "references/suggestion_review.md").read_text(
+            encoding="utf-8"
+        )
+        naturalness = (ROOT / "references/check_modules/naturalness.md").read_text(
+            encoding="utf-8"
+        )
+        korean = (ROOT / "target_languages/ko/eval_notes.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("不自动证明目标语言必须使用某个敬语等级", review)
+        self.assertIn("不自动等于目标语言的敬语等级", naturalness)
+        self.assertIn("不自动等于韩语 `-요/-습니다`", korean)
+        for content in (review, naturalness, korean):
+            self.assertIn("scene", content)
+            self.assertIn("相似", content)
 
     def test_skill_publishes_review_mode_contract(self):
         self.assertEqual(
