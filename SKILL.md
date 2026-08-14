@@ -501,7 +501,7 @@ python "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 
 参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段或约束冲突时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
 
-建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
+建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。缺少说话人、受话人或关系字段本身不触发弃权：若源文已明确 speech act、强度或敌意，且候选无需选择未知关系、称谓、代词、礼貌等级或角色口吻即可忠实表达，应继续生成并引用源文证据；只有缺失信息会实质改变候选措辞时才弃权。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
 
 一键收尾：
 

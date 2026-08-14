@@ -498,6 +498,90 @@ class ReferenceSuggestionContractTests(unittest.TestCase):
             }],
         )
 
+    def test_source_explicit_tone_can_proceed_when_dialogue_context_is_incomplete(self):
+        segments = [{
+            "id": 0,
+            "source": "Follow me home!",
+            "target": "Come with me.",
+            "context": {
+                "context_contract_version": 1,
+                "status": "context_incomplete",
+                "core": {"content_type": "dialogue"},
+                "extensions": {
+                    "dialogue": {
+                        "status": "incomplete",
+                        "speaker_id": "speaker",
+                    }
+                },
+                "provenance": {},
+                "missing_required": [],
+            },
+        }]
+        results = [{
+            "id": 0,
+            "errors": [issue("The command intensity is weakened.")],
+            "corrected": None,
+        }]
+        packet = build_suggestion_packet(
+            segments,
+            None,
+            results,
+            context_view_basis={
+                "source_modules": ["accuracy", "suggestions"],
+                "merged_view": {
+                    "capabilities": ["context.core@1", "context.dialogue@1"]
+                },
+            },
+        )
+        explicit_semantics = source_semantics()
+        explicit_semantics.update({
+            "actions": ["orders the addressee to follow"],
+            "objects": ["addressee", "home"],
+            "modality": ["imperative"],
+            "speech_act": "command",
+            "text_function": "direct dialogue",
+            "intensity": "strong",
+        })
+        explicit_tone = tone_decision()
+        explicit_tone.update({
+            "register": "source-explicit forceful command",
+            "politeness": "no relationship-specific choice added",
+            "evidence": [{
+                "type": "source_form",
+                "value": "imperative and exclamation establish a strong command",
+            }],
+        })
+        draft = {
+            "schema": DRAFT_SCHEMA,
+            "version": DRAFT_VERSION,
+            "packet_digest": packet["packet_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "worker_receipt": GENERATION_RECEIPT,
+            "selection": packet["selection"],
+            "reviewed_ids": packet["reviewed_ids"],
+            "entries": [{
+                "id": 0,
+                "reference_target": "Follow me home!",
+                "source_semantics": explicit_semantics,
+                "tone_decision": explicit_tone,
+            }],
+            "abstained_ids": [],
+            "abstention_reasons": [],
+        }
+
+        artifact = build_candidate_artifact(packet, draft, segments)
+
+        self.assertEqual(
+            artifact["routes"][0]["risk_route"],
+            "independent_verifier",
+        )
+        self.assertNotIn(
+            "DIALOGUE_CONTEXT_INCOMPLETE",
+            artifact["routes"][0].get("reason_codes", []),
+        )
+
     def test_dialogue_dependent_tone_fails_closed_when_context_is_incomplete(self):
         segments = [{
             "id": 0,

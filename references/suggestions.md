@@ -50,12 +50,11 @@
         "unsupported_additions": []
       },
       "tone_decision": {
-        "register": "plain and forceful",
-        "politeness": "non-honorific",
-        "depends_on_dialogue_context": true,
+        "register": "source-explicit forceful command",
+        "politeness": "no relationship-specific choice added",
+        "depends_on_dialogue_context": false,
         "evidence": [
-          {"type": "source_form", "value": "imperative and exclamation"},
-          {"type": "context", "value": "speaker/addressee evidence in bundle"}
+          {"type": "source_form", "value": "imperative and exclamation directly establish a strong command"}
         ],
         "uncertainties": []
       }
@@ -81,8 +80,10 @@
 - 从 source 重新建立主体、动作、对象、极性/否定、情态、speech act、文本功能和强度；当前 target 只用于保留变量、标签、换行、保护文本和已验证局部修改。
 - `optimized` 优先读取 `content_type`，否则读取 `text_type_context`；缺失或未知时按标准强度。文本功能和语气只能结合正式上下文证据判断，不能从项目或目标语言的词面硬猜。`full` 不因文本类型降低检查。
 - `source_semantics` 同时记录 source→candidate 的漏译检查和 candidate→source 的增译检查。仍有漏项或无来源信息时，不得提交候选。
-- `tone_decision` 必须给出源文或正式上下文证据。只要仍有不确定性，写入 `abstained_ids`。
-- `dialogue_context_readiness` 不完整或冲突时，不得依靠猜测补说话人、关系、礼貌度或 character voice。依赖这些信息的候选会被 publisher 硬拒绝。
+- `tone_decision` 必须给出源文或正式上下文证据。只有会实质影响候选措辞且无法规避的不确定性，才写入 `abstained_ids`。
+- `depends_on_dialogue_context` 表示“候选措辞是否依赖缺失或冲突的对话信息”，不是“该句是否属于对话”或“对话字段是否齐全”。
+- `speaker_id`、`addressee_ids` 或 `relationship_stage` 缺失本身不是自动弃权条件。若源文形式已经明确 speech act、intensity 或敌意/辱骂强度，且候选不需要选择未知关系、称谓/代词、礼貌等级或 character voice 即可保持这些信息，设 `depends_on_dialogue_context: false`，并引用 `source_form` 证据。
+- 只有缺失或冲突的信息会实质改变候选的 register、politeness、称谓/代词或 character voice 时，才设 `depends_on_dialogue_context: true`；此时不得猜测，必须弃权。publisher 会拒绝在 `dialogue_context_readiness` 非 ready 时提交的此类候选。
 - 必须处理全部 `known_issues`，不是只处理 `trigger_issue_ids`；生成后再检查 Mistranslation、Omission、Addition、语法、自然度和全部 resolved constraints。
 - 变量、标签、换行和保护文本的数量与顺序必须保留。
 - `excluded_segments` 不得重新引入。未解决术语、保护段、输入阻断和约束冲突均不能被其他模块意见绕过。

@@ -16,7 +16,7 @@
 8. intensity；
 9. source→candidate 是否漏掉条件、范围或其他信息；
 10. candidate→source 是否增添无来源信息；
-11. tone、politeness、register 和 character voice 是否有 source/正式上下文证据。
+11. tone、politeness、register 和 character voice 是否有 source/正式上下文证据。对话字段缺失本身不是失败；若 source 已明确 speech act、intensity 或敌意，且候选没有加入依赖未知关系的称谓、代词、礼貌等级或 character voice，可按 source 证据通过。
 
 还要确认全部 `known_issues` 已解决，变量、标签、换行、保护文本和 confirmed constraints 均满足。当前 target 不是候选含义正确的证据。证据不足或需要业务选择时返回 `human_required`。
 

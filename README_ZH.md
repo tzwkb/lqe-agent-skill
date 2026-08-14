@@ -372,6 +372,8 @@ python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 
 `optimized` 默认只将 Major/Critical 放入候选；`full` 默认纳入全部严重度。未解决术语结论、blocked/保护段和约束冲突在生成前直接拒绝；生成后再按候选文本重评已解析约束。明确不匹配的候选硬拒绝，无法确定的候选交给独立 verifier。只有验收通过的候选才能进入 v5 正式建议；candidate、review 或 final 摘要过期均 fail closed。
 
+缺少说话人、受话人或关系字段不等于自动弃权。若源文已经明确 speech act、强度或敌意，且候选不需要选择未知关系、称谓、代词、礼貌等级或角色口吻即可保持这些信息，生成 worker 应引用源文证据继续生成；只有缺失信息会实质改变候选措辞时才弃权。
+
 首轮检查应明确使用 `single`：
 
 ```bash

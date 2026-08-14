@@ -365,6 +365,8 @@ python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 
 `optimized` defaults candidates to Major/Critical; `full` defaults to every severity. Unresolved terminology decisions, blocked/protected segments, and constraint conflicts are rejected before generation. Resolved constraints are re-evaluated against the generated candidate: a definite mismatch is rejected, while an inconclusive result goes to the independent verifier. Only accepted candidates enter the v5 final artifact; stale candidate, review, or final digests fail closed.
 
+Missing speaker, addressee, or relationship fields do not automatically require abstention. If the source itself establishes the speech act, intensity, or hostility and the candidate can preserve it without choosing an unknown relationship, form of address, pronoun, politeness level, or character voice, generation proceeds with source-form evidence. Abstention is required only when the missing information would materially change the candidate wording.
+
 For a first-round review, explicitly use `single`:
 
 ```bash

@@ -271,6 +271,17 @@ class DocumentedContractTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.suggestions)
 
+    def test_reference_suggestions_do_not_auto_abstain_for_missing_dialogue_fields(self):
+        for phrase in (
+            '"depends_on_dialogue_context": false',
+            "不是自动弃权条件",
+            "源文形式已经明确",
+            "候选不需要选择未知关系",
+            "会实质改变候选",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.suggestions)
+
     def test_skill_publishes_review_mode_contract(self):
         self.assertEqual(
             parse_review_mode_contract(self.skill),
