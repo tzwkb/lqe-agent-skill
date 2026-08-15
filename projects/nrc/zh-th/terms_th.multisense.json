@@ -5,7 +5,7 @@
    {
     "target": "เทอริล",
     "category": "Creature Individual",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    },
    {
@@ -22,7 +22,7 @@
    {
     "target": "เทมพี",
     "category": "Creature Individual",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    },
    {
@@ -56,13 +56,13 @@
    {
     "target": "สโครลลาร์ด",
     "category": "Creature Species",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    },
    {
     "target": "ผู้พิทักษ์คัมภีร์",
     "category": "Creature Individual",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    }
   ]
@@ -73,7 +73,7 @@
    {
     "target": "คากู",
     "category": "Creature Species",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    },
    {
@@ -96,7 +96,7 @@
    {
     "target": "มาดามสีมรกต",
     "category": "Creature Individual",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    }
   ]
@@ -136,12 +136,29 @@
   ]
  },
  {
+  "source": "吞噬",
+  "senses": [
+   {
+    "target": "เวลมอธ",
+    "category": "Creature Species",
+    "confirmed": true,
+    "protected": false
+   },
+   {
+    "target": "กลืนกิน",
+    "category": "Jini Combat System",
+    "confirmed": true,
+    "protected": false
+   }
+  ]
+ },
+ {
   "source": "帕帕斯卡",
   "senses": [
    {
     "target": "พาพาสโก",
     "category": "Creature Species",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    },
    {
@@ -175,13 +192,13 @@
    {
     "target": "เฮกซิวาร์",
     "category": "Creature Species",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    },
    {
     "target": "เจ้าหกนักสู้",
     "category": "Creature Individual",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    }
   ]
@@ -198,7 +215,7 @@
    {
     "target": "กูลูนี",
     "category": "Creature Individual",
-    "confirmed": false,
+    "confirmed": true,
     "protected": false
    }
   ]
@@ -215,6 +232,23 @@
    {
     "target": "เฟลวาร์ด",
     "category": "Named NPC",
+    "confirmed": true,
+    "protected": false
+   }
+  ]
+ },
+ {
+  "source": "洛克王国",
+  "senses": [
+   {
+    "target": "อาณาจักรโรโค",
+    "category": "Administrative Region",
+    "confirmed": true,
+    "protected": false
+   },
+   {
+    "target": "Roco Kingdom",
+    "category": "Core Lore",
     "confirmed": true,
     "protected": false
    }

@@ -98,7 +98,9 @@ def main():
     ap.add_argument("--approved-statuses", default=None,
                     help="comma-separated status values that map to confirmed:true, "
                          "e.g. 'Approved,合规审核通过'. Use '*' to confirm the whole "
-                         "glossary, or '' (empty) to explicitly leave all unconfirmed. "
+                         "emitted glossary (including --no-status and backfilled terms), "
+                         "or '' (empty) to "
+                         "explicitly leave all unconfirmed. "
                          "REQUIRED when the master has a status column; if omitted the "
                          "converter fail-closed exits (LQE term-confirmation contract).")
     ap.add_argument("--protected-statuses", default=None,
@@ -223,7 +225,9 @@ def main():
             excluded += 1
             continue
 
-        cand = {"target": tgt, "confirmed": False, "protected": False}
+        # '*' is an explicit whole-glossary confirmation decision. It also applies
+        # when the workbook has no status column and the caller asserted --no-status.
+        cand = {"target": tgt, "confirmed": bool(all_approved), "protected": False}
         if raw_st:
             cand["status"] = raw_st  # store original (unedited) value for readability
             cand["confirmed"] = bool(all_approved or (st in approved_set))
@@ -259,7 +263,7 @@ def main():
             if s and g and s in empty_src and s not in by_src:
                 item = {
                     "target": g,
-                    "confirmed": t.get("confirmed") is True,
+                    "confirmed": bool(all_approved or t.get("confirmed") is True),
                     "protected": t.get("protected") is True,
                 }
                 st = clean(t.get("status"))

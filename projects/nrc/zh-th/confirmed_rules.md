@@ -51,4 +51,12 @@
 - 多义来源共 14 个：翼龙、伊兰、伊贝儿、书卷守护、咔咔羽毛、翠顶夫人、里奥、黄蜂后、帕帕斯卡、呱呱、格斗小六、古路尼、裘卡、克制；以 `terms_th.multisense.json` 为准
 - 状态映射沿用当前项目口径：Approved、合规审核通过为 `confirmed: true`；New、NeedReview、空状态为 `confirmed: false`；全部为 `protected: false`
 
+## TB 更新 2026-08-11（Master TB 0807 MMQ 导入）
+- 源文件 `../common/ROCO_MasterTB_0807_MMQ.xlsx`；旧库快照 `terms_th_pre0807.bak.json`，旧多义清单快照 `terms_th_pre0807.multisense.bak.json`
+- 源表无状态列；用户于 2026-08-11 明确选择“整表确认”。所有 5,761 个非空 TH 义项均写为 `confirmed: true`、`protected: false`
+- 导入 5,745 个来源、5,761 个义项；相较 0728 新增 50 个来源，无来源移除，171 个共有来源的泰语译法发生变化
+- 378 行 TH 为空，本次未从旧库回填；非空译文中无 `target="0"` 占位符
+- 多义来源共 16 个：翼龙、伊兰、伊贝儿、书卷守护、咔咔羽毛、翠顶夫人、里奥、黄蜂后、吞噬、帕帕斯卡、呱呱、格斗小六、古路尼、裘卡、洛克王国、克制；以 `terms_th.multisense.json` 为准
+- 0728 曾标记 Denied 的水枝枝、海珊瑚、礼拜堂、礼堂、豆包鱼、豆豆鱼均在 0807 源表中重现；按本次“整表确认”决定视为重新批准，已纳入术语库
+
 （范围口径「都列出」、severity 口径见 SKILL.md 标准流程，全语言通用，不在此重复）

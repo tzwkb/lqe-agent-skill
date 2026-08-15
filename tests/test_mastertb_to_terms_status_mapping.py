@@ -216,6 +216,43 @@ class MasterTBToTermsStatusMappingTests(unittest.TestCase):
         self.assertIn("花衣蝶", terms)
         self.assertFalse(terms["花衣蝶"]["confirmed"])
 
+    def test_no_status_column_can_be_explicitly_confirmed_as_whole_glossary(self):
+        """Choice 1 applies even when the workbook has no status column."""
+        m = self.work / "nostatus.xlsx"
+        build_master_tb(m, include_status=False)
+        result = self.run_converter(
+            "--no-status", "--approved-statuses", "*", input_path=m
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for term in self.load():
+            senses = term.get("senses") or [term]
+            self.assertTrue(all(sense["confirmed"] is True for sense in senses))
+            self.assertTrue(all(sense["protected"] is False for sense in senses))
+
+    def test_whole_glossary_confirmation_includes_backfilled_terms(self):
+        m = self.work / "nostatus.xlsx"
+        old = self.work / "old.json"
+        build_master_tb(m, include_status=False)
+        old.write_text(
+            json.dumps([
+                {
+                    "source": "空译词",
+                    "target": "คำเก่า",
+                    "confirmed": False,
+                    "protected": False,
+                }
+            ], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        result = self.run_converter(
+            "--no-status", "--approved-statuses", "*", "--backfill", old,
+            input_path=m,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        terms = {t["source"]: t for t in self.load()}
+        self.assertTrue(terms["空译词"]["confirmed"])
+        self.assertFalse(terms["空译词"]["protected"])
+
     def test_ambiguous_status_columns_fail_closed(self):
         """Multiple status-keyword columns -> fail-closed until disambiguated by
         --status-col (never guesses)."""
