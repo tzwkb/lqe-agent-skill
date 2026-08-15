@@ -16,11 +16,12 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import tempfile
 import unicodedata
 from copy import copy, deepcopy
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import openpyxl
@@ -36,7 +37,9 @@ from lqe_engine import (
     apply_severity, build_check_scope, build_review_policy,
     get_check_scope, get_review_policy,
     current_target,
+    job_runtime_contract_version,
     load_terms as _load_terms, group_terms as _group_terms,
+    require_current_job_runtime,
     requires_bound_artifacts,
     raw_points, weighted_points,
     load_scorecard_profile, normalize_category_for_profile, scorecard_category_order,
@@ -53,7 +56,14 @@ from lqe_corrections import (
     validate_error_history_term_contract,
     verify_results,
 )
-from lqe_inputs import SDLXLIFFImportError, detect_input_format, read_sdlxliff
+from lqe_inputs import (
+    SDLXLIFFImportError,
+    XLSImportError,
+    detect_input_format,
+    read_sdlxliff,
+    read_xls,
+)
+from lqe_inputs.xls import workbook_for_corrected_export
 from lqe_inputs.sdlxliff import (
     is_exact_tm,
     validate_options as validate_sdlxliff_options,
@@ -77,7 +87,7 @@ from lqe_scoring import (
     score_errors,
     scoring_policy_overrides,
 )
-from lqe_report_contract import attach_report_contract
+from lqe_report_contract import attach_report_contract, context_audit_values
 from lqe_provenance import (
     AUDIT_HEADER_BASES,
     issue_detail,
@@ -89,6 +99,49 @@ from lqe_result_contract import (
     validate_result_contract,
 )
 from lqe_suggestions import ARTIFACT_NAME, load_reference_suggestions
+from lqe_capabilities import (
+    JOB_RUNTIME_CONTRACT_VERSION,
+    normalize_profile,
+    resolve_capabilities,
+)
+from lqe_project_assets import (
+    asset_statuses,
+    copy_project_assets,
+    inspect_project_assets,
+)
+from lqe_input_guard import (
+    apply_pivot_comparison,
+    apply_target_source_digest_guard,
+    build_segment_identity,
+    canonical_digest as input_guard_digest,
+    ensure_unique_business_keys,
+    input_guard_summary,
+    source_digest,
+)
+from lqe_context import (
+    CORE_CAPABILITY_ID,
+    ContextContractError,
+    canonical_field_ref,
+    descriptor_registry,
+    extract_segment_context,
+    module_review_equivalence_key,
+    parse_context_columns,
+    resolve_context_columns,
+)
+from lqe_language_policies import (
+    evaluate_language_policy,
+    trusted_provider_registry,
+)
+from lqe_profile_ingest import (
+    apply_segment_context_overrides,
+    load_project_source_manifest,
+    validate_context_rules,
+)
+from lqe_shadow import build_shadow_context_artifact
+from lqe_context_overrides import (
+    build_context_gap_report,
+    load_and_apply_job_context_overrides,
+)
 
 
 def _validate_scope_or_exit(
@@ -203,6 +256,46 @@ def _load_project(name_or_path: str) -> dict:
     return prof
 
 
+def _deep_merge_profile(base: object, overlay: object, location: str = "profile"):
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        merged = deepcopy(base)
+        for key, value in overlay.items():
+            if key in merged:
+                merged[key] = _deep_merge_profile(
+                    merged[key], value, f"{location}.{key}"
+                )
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+    if isinstance(base, dict) != isinstance(overlay, dict):
+        raise ValueError(f"profile overlay type conflict at {location}")
+    return deepcopy(overlay)
+
+
+def _load_profile_overlay(path: str, base: dict) -> dict:
+    overlay_path = Path(path)
+    if not overlay_path.is_file():
+        raise FileNotFoundError(f"profile overlay not found: {overlay_path}")
+    overlay = read_json(overlay_path)
+    if not isinstance(overlay, dict):
+        raise ValueError("profile overlay must be an object")
+    forbidden = {
+        "language_pair",
+        "source_lang",
+        "target_lang",
+        "name",
+        "profile_contract_version",
+    }
+    for field in forbidden:
+        if field in overlay and overlay[field] != base.get(field):
+            raise ValueError(f"profile overlay cannot change {field}")
+    merged = _deep_merge_profile(base, overlay)
+    merged["_dir"] = base["_dir"]
+    merged["_path"] = base["_path"]
+    merged["_overlay_path"] = str(overlay_path.resolve())
+    return merged
+
+
 def _validate_project_profile(prof: dict):
     required = ("language_pair", "source_lang", "target_lang")
     missing = [k for k in required if not str(prof.get(k, "")).strip()]
@@ -232,6 +325,25 @@ def _validate_project_profile(prof: dict):
             file=sys.stderr,
         )
         sys.exit(1)
+    try:
+        normalized = normalize_profile(prof)
+        inspection = inspect_project_assets(
+            normalized,
+            profile_dir=Path(prof["_dir"]),
+            allow_outside_root=normalized.get("legacy_adapter", False),
+            strict_required=True,
+        )
+        resolution = resolve_capabilities(
+            normalized,
+            asset_statuses=asset_statuses(inspection["snapshot"]),
+            provider_registry=trusted_provider_registry(),
+        )
+    except ValueError as exc:
+        print(f"[ERROR] project profile contract: {exc}", file=sys.stderr)
+        sys.exit(1)
+    prof["_normalized_profile"] = normalized
+    prof["_asset_inspection"] = inspection
+    prof["_capability_resolution"] = resolution
 
 
 def _project_path(prof: dict, val: str) -> str:
@@ -245,6 +357,12 @@ def _profile_reference_paths(prof: dict | None) -> dict[str, Path]:
     if not prof:
         return {}
     references = {"--project": Path(prof["_path"])}
+    if prof.get("_overlay_path"):
+        references["--profile-overlay"] = Path(prof["_overlay_path"])
+    inspection = prof.get("_asset_inspection")
+    if isinstance(inspection, dict):
+        for asset_id, path in inspection.get("resolved_paths", {}).items():
+            references[f"project.asset.{asset_id}"] = Path(path)
     for field in ("style_guide", "terminology", "checks", "confirmed_rules"):
         value = prof.get(field)
         if isinstance(value, str) and value.strip():
@@ -255,6 +373,33 @@ def _profile_reference_paths(prof: dict | None) -> dict[str, Path]:
             confirmed.parent.parent / "common" / "confirmed_rules_common.md"
         )
     return references
+
+
+def _profile_asset_by_kind(prof: dict | None, kind: str) -> tuple[str, dict] | None:
+    if not prof:
+        return None
+    normalized = prof.get("_normalized_profile")
+    assets = normalized.get("assets", {}) if isinstance(normalized, dict) else {}
+    matches = [
+        (asset_id, declaration)
+        for asset_id, declaration in assets.items()
+        if declaration.get("kind") == kind
+    ]
+    if len(matches) > 1:
+        raise ValueError(f"profile declares multiple {kind!r} assets")
+    return matches[0] if matches else None
+
+
+def _active_profile_asset_path(prof: dict | None, kind: str) -> str:
+    match = _profile_asset_by_kind(prof, kind)
+    if match is None:
+        return ""
+    asset_id, declaration = match
+    snapshot = (prof.get("_asset_inspection") or {}).get("snapshot", {})
+    status = snapshot.get("assets", {}).get(asset_id, {}).get("status")
+    if status != "present":
+        return ""
+    return _project_path(prof, declaration["path"])
 
 
 def _docx_list_value(value: int, fmt: str) -> str:
@@ -450,19 +595,989 @@ def _text(v):
     return str(v).strip() if v is not None else ""
 
 
-def _extract_text_type_marker(src, tgt=None, content_type=None):
-    """AIPE CSV may contain text-type header rows; they are context, not segments."""
-    s = _text(src)
-    if not s:
+def _tabular_default_headers(width: int) -> list[str]:
+    defaults = [
+        "Key", "Source", "Target", "Status", "Comment", "Scope", "File",
+        "Reviewer Note",
+    ]
+    return [
+        defaults[index] if index < len(defaults) else f"col{index}"
+        for index in range(width)
+    ]
+
+
+def _read_tabular_source(
+    path: Path,
+    *,
+    sheet_name: str | None,
+    no_header: bool,
+) -> tuple[list, list[list], str, dict]:
+    suffix = path.suffix.casefold()
+    file_digest = file_sha256(path)
+    if suffix in {".csv", ".tsv"}:
+        if sheet_name:
+            raise ValueError("--sheet is not valid for CSV/TSV input")
+        delimiter = "\t" if suffix == ".tsv" else ","
+        raw_rows = list(
+            csv.reader(
+                io.StringIO(path.read_bytes().decode("utf-8-sig")),
+                delimiter=delimiter,
+            )
+        )
+        width = max((len(row) for row in raw_rows), default=0)
+        if no_header:
+            headers = _tabular_default_headers(width)
+            data_rows = raw_rows
+        else:
+            headers = [
+                str(value).strip() if value is not None else ""
+                for value in (raw_rows[0] if raw_rows else [])
+            ]
+            data_rows = raw_rows[1:] if raw_rows else []
+        container = path.name
+        manifest = {
+            "schema": "lqe.tabular-source-manifest",
+            "version": 1,
+            "adapter": "csv@1" if suffix == ".csv" else "tsv@1",
+            "format": suffix.lstrip("."),
+            "sheet": None,
+            "sheet_names": [],
+            "rows": len(raw_rows),
+            "columns": width,
+            "coordinate_system": "zero_based_data_row_and_column",
+            "limitations": [],
+        }
+    elif suffix == ".xls":
+        result = read_xls(path, sheet_name=sheet_name, no_header=no_header)
+        headers = list(result.headers)
+        data_rows = [list(row) for row in result.data_rows]
+        container = result.sheet_name
+        manifest = deepcopy(result.manifest)
+    else:
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=False)
+        try:
+            if sheet_name is not None and sheet_name not in workbook.sheetnames:
+                raise ValueError(
+                    f"sheet {sheet_name!r} not found; available sheets: "
+                    f"{workbook.sheetnames}"
+                )
+            selected = sheet_name or workbook.active.title
+            worksheet = workbook[selected]
+            raw_rows = [list(row) for row in worksheet.iter_rows(values_only=True)]
+            width = max((len(row) for row in raw_rows), default=0)
+            if no_header:
+                headers = _tabular_default_headers(width)
+                data_rows = raw_rows
+            else:
+                headers = raw_rows[0] if raw_rows else []
+                data_rows = raw_rows[1:] if raw_rows else []
+            container = selected
+            manifest = {
+                "schema": "lqe.tabular-source-manifest",
+                "version": 1,
+                "adapter": "xlsx.openpyxl@1",
+                "format": suffix.lstrip("."),
+                "sheet": selected,
+                "sheet_names": list(workbook.sheetnames),
+                "rows": len(raw_rows),
+                "columns": width,
+                "coordinate_system": "zero_based_data_row_and_column",
+                "limitations": [],
+            }
+        finally:
+            workbook.close()
+    manifest.update(
+        {
+            "input_path": str(path.resolve()),
+            "input_sha256": file_digest,
+            "no_header": bool(no_header),
+        }
+    )
+    return list(headers), data_rows, container, manifest
+
+
+def _resolve_input_column(
+    headers: list,
+    value: object,
+    *,
+    no_header: bool,
+    label: str,
+) -> int:
+    if no_header:
+        try:
+            index = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"--no-header mode requires an integer for {label}"
+            ) from exc
+        if index < 0 or index >= len(headers):
+            raise ValueError(f"{label} column index is out of range: {index}")
+        return index
+    matches = [
+        index for index, header in enumerate(headers)
+        if str(header or "").strip() == str(value or "").strip()
+    ]
+    if not matches:
+        raise ValueError(f"column {value!r} not found; available: {headers}")
+    if len(matches) > 1:
+        raise ValueError(f"column {value!r} is duplicated at indexes {matches}")
+    return matches[0]
+
+
+def _context_cli_specs(args) -> list[str]:
+    specs = list(getattr(args, "context_cols", None) or [])
+    aliases = {
+        "content_type_col": "content_type",
+        "speaker_col": "speaker_id",
+        "addressee_col": "addressee_ids",
+        "relationship_stage_col": "relationship_stage",
+        "scene_id_col": "scene_id",
+        "scene_tone_col": "scene_tone",
+        "context_note_col": "context_note",
+    }
+    for argument, field in aliases.items():
+        value = getattr(args, argument, None)
+        if value is not None:
+            specs.append(f"{field}={value}")
+    return specs
+
+
+def _context_cli_specs_for_registry(
+    specs: list[str],
+    *,
+    source_registry: dict,
+    target_registry: dict,
+) -> dict[str, object]:
+    target_fields = {
+        f"{capability_id}.{field_name}"
+        for capability_id, descriptor in target_registry.items()
+        for field_name in descriptor.get("fields", {})
+    }
+    selected = {}
+    for raw_ref, column in parse_context_columns(specs).items():
+        canonical = canonical_field_ref(raw_ref, source_registry)
+        if canonical in selected:
+            raise ContextContractError(
+                f"duplicate CLI mapping for context field: {canonical}"
+            )
+        if canonical in target_fields:
+            selected[canonical] = column
+    return selected
+
+
+_PIVOT_BUILTIN_FIELDS = {"source", "target", "key"}
+
+
+def _pivot_digest_value(value: object) -> object:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return str(value)
+
+
+def _tabular_grid_digest(headers: list, rows: list[list]) -> str:
+    return input_guard_digest(
+        {
+            "headers": [_pivot_digest_value(value) for value in headers],
+            "rows": [
+                [_pivot_digest_value(value) for value in row]
+                for row in rows
+            ],
+        }
+    )
+
+
+def _column_binding(
+    headers: list,
+    index: int,
+    *,
+    no_header: bool,
+    method: str,
+) -> dict:
+    return {
+        "column_index": index,
+        "column": index if no_header else _text(headers[index]),
+        "method": method,
+    }
+
+
+def _parse_pivot_compare_specs(specs: list[str], registry: dict) -> list[dict]:
+    comparisons = []
+    seen = set()
+    for spec in specs:
+        if not isinstance(spec, str) or spec.count("=") != 1:
+            raise ValueError(
+                "--pivot-compare must use FIELD=COLUMN exactly once"
+            )
+        raw_field, raw_column = (part.strip() for part in spec.split("=", 1))
+        if not raw_field or not raw_column:
+            raise ValueError(
+                "--pivot-compare field and column must be non-empty"
+            )
+        builtin = raw_field.casefold()
+        if builtin in _PIVOT_BUILTIN_FIELDS:
+            field = builtin
+            kind = "builtin"
+        else:
+            field = canonical_field_ref(raw_field, registry)
+            kind = "context"
+        if field in seen:
+            raise ValueError(f"duplicate --pivot-compare field: {field}")
+        seen.add(field)
+        comparisons.append(
+            {
+                "field": field,
+                "kind": kind,
+                "pivot_column": raw_column,
+            }
+        )
+    return comparisons
+
+
+def _context_comparison_normalizer(field_ref: str, registry: dict) -> tuple[str, str]:
+    capability_id, field_name = field_ref.rsplit(".", 1)
+    descriptor_normalizer = registry[capability_id]["fields"][field_name][
+        "normalizer"
+    ]
+    comparison_normalizer = {
+        "identity": "text",
+        "trim": "trim",
+        "lowercase": "text",
+        "positive_integer": "integer",
+        "string_list": "text",
+    }.get(descriptor_normalizer)
+    if comparison_normalizer is None:
+        raise ValueError(
+            f"unsupported pivot normalizer for {field_ref}: "
+            f"{descriptor_normalizer!r}"
+        )
+    return descriptor_normalizer, comparison_normalizer
+
+
+def _prepare_pivot_guard(
+    args,
+    *,
+    input_path: Path,
+    main_container: str,
+    main_headers: list,
+    source_index: int,
+    target_index: int,
+    key_index: int | None,
+    resolved_context_columns: dict,
+    registry: dict,
+    no_header: bool,
+) -> dict | None:
+    pivot_sheet = getattr(args, "pivot_sheet", None)
+    pivot_key_col = getattr(args, "pivot_key_col", None)
+    pivot_compare = list(getattr(args, "pivot_compare", None) or [])
+    pivot_authority = getattr(args, "pivot_authority", None)
+    configured = any(
+        value not in (None, [], "")
+        for value in (
+            pivot_sheet,
+            pivot_key_col,
+            pivot_compare,
+            pivot_authority,
+        )
+    )
+    if not configured:
         return None
-    explicit = {"对话类文本", "游戏内侧页文本", "故事类文本"}
-    if s in explicit:
-        return s
-    m = re.match(r"^(?:文本类型|文本类别)\s*[:：]\s*(.+)$", s)
-    if m and m.group(1).strip():
-        return m.group(1).strip()
-    if s in {"文本类型", "文本类别"}:
-        return _text(tgt) or _text(content_type) or s
+    missing = [
+        flag
+        for flag, value in (
+            ("--pivot-sheet", pivot_sheet),
+            ("--pivot-key-col", pivot_key_col),
+            ("--pivot-compare", pivot_compare),
+            ("--pivot-authority", pivot_authority),
+        )
+        if value in (None, [], "")
+    ]
+    if missing:
+        raise ValueError(
+            "pivot configuration requires all of --pivot-sheet, "
+            "--pivot-key-col, --pivot-compare, and --pivot-authority; missing: "
+            + ", ".join(missing)
+        )
+    if key_index is None:
+        raise ValueError("pivot join requires an explicit --key-col")
+    if input_path.suffix.casefold() not in {".xlsx", ".xls"}:
+        raise ValueError(
+            "--pivot-sheet is only valid for .xlsx or .xls workbook input"
+        )
+
+    pivot_headers, pivot_rows, pivot_container, pivot_manifest = (
+        _read_tabular_source(
+            input_path,
+            sheet_name=str(pivot_sheet),
+            no_header=no_header,
+        )
+    )
+    if pivot_container == main_container:
+        raise ValueError("pivot sheet must differ from the main sheet")
+    if not pivot_rows:
+        raise ValueError("pivot sheet has no data rows")
+    pivot_widths = {
+        len(row) for row in pivot_rows if any(_text(cell) for cell in row)
+    }
+    if len(pivot_widths) > 1:
+        raise ValueError(
+            f"pivot sheet has inconsistent row widths: {sorted(pivot_widths)}"
+        )
+
+    pivot_key_index = _resolve_input_column(
+        pivot_headers,
+        pivot_key_col,
+        no_header=no_header,
+        label="--pivot-key-col",
+    )
+    parsed = _parse_pivot_compare_specs(pivot_compare, registry)
+    pivot_rows_by_key = {}
+    pivot_row_indexes = {}
+    for row_index, row in enumerate(pivot_rows):
+        if not any(_text(cell) for cell in row):
+            continue
+        key = _text(_cell(row, pivot_key_index))
+        if not key:
+            raise ValueError(
+                f"pivot business key is empty at data row {row_index}"
+            )
+        if key in pivot_rows_by_key:
+            raise ValueError(
+                f"duplicate pivot business key {key!r}: data rows "
+                f"{pivot_row_indexes[key]} and {row_index}"
+            )
+        pivot_rows_by_key[key] = list(row)
+        pivot_row_indexes[key] = row_index
+    if not pivot_rows_by_key:
+        raise ValueError("pivot sheet has no keyed data rows")
+
+    comparisons = []
+    for item in parsed:
+        field = item["field"]
+        pivot_index = _resolve_input_column(
+            pivot_headers,
+            item["pivot_column"],
+            no_header=no_header,
+            label=f"--pivot-compare {field}",
+        )
+        if item["kind"] == "builtin":
+            primary_index = {
+                "source": source_index,
+                "target": target_index,
+                "key": key_index,
+            }[field]
+            primary_mapping = _column_binding(
+                main_headers,
+                primary_index,
+                no_header=no_header,
+                method=f"primary_{field}_column",
+            )
+            descriptor_normalizer = "trim"
+            comparison_normalizer = "trim"
+        else:
+            if field not in resolved_context_columns:
+                raise ValueError(
+                    f"pivot comparison field {field} has no primary context "
+                    "column mapping"
+                )
+            primary_mapping = deepcopy(resolved_context_columns[field])
+            descriptor_normalizer, comparison_normalizer = (
+                _context_comparison_normalizer(field, registry)
+            )
+        pivot_mapping = _column_binding(
+            pivot_headers,
+            pivot_index,
+            no_header=no_header,
+            method="pivot_cli",
+        )
+        if item["kind"] == "context":
+            pivot_mapping.update(
+                {
+                    key: primary_mapping[key]
+                    for key in (
+                        "capability_id",
+                        "descriptor_id",
+                        "extension",
+                        "field",
+                    )
+                }
+            )
+        comparisons.append(
+            {
+                "field": field,
+                "kind": item["kind"],
+                "normalizer": comparison_normalizer,
+                "descriptor_normalizer": descriptor_normalizer,
+                "primary": primary_mapping,
+                "pivot": pivot_mapping,
+            }
+        )
+
+    public_comparisons = [
+        {
+            "field": item["field"],
+            "kind": item["kind"],
+            "normalizer": item["normalizer"],
+            "descriptor_normalizer": item["descriptor_normalizer"],
+            "primary": deepcopy(item["primary"]),
+            "pivot": deepcopy(item["pivot"]),
+        }
+        for item in comparisons
+    ]
+    mapping_payload = {
+        "main_sheet": main_container,
+        "pivot_sheet": pivot_container,
+        "key": {
+            "primary": _column_binding(
+                main_headers,
+                key_index,
+                no_header=no_header,
+                method="primary_key_column",
+            ),
+            "pivot": _column_binding(
+                pivot_headers,
+                pivot_key_index,
+                no_header=no_header,
+                method="pivot_key_column",
+            ),
+        },
+        "comparisons": public_comparisons,
+        "authority": pivot_authority,
+    }
+    return {
+        "rows_by_key": pivot_rows_by_key,
+        "row_indexes": pivot_row_indexes,
+        "comparisons": comparisons,
+        "comparison_registry": {
+            capability_id: {
+                **deepcopy(descriptor),
+                "applies_when": {},
+            }
+            for capability_id, descriptor in registry.items()
+        },
+        "public": {
+            "schema": "lqe.pivot-guard",
+            "version": 1,
+            "workbook_sha256": pivot_manifest["input_sha256"],
+            "main_sheet": main_container,
+            "pivot_sheet": pivot_container,
+            "pivot_sheet_digest": _tabular_grid_digest(
+                pivot_headers, pivot_rows
+            ),
+            "authority": pivot_authority,
+            "key": deepcopy(mapping_payload["key"]),
+            "comparisons": public_comparisons,
+            "mapping_digest": input_guard_digest(mapping_payload),
+        },
+    }
+
+
+def _context_values_for_pivot(
+    row: list,
+    comparisons: list[dict],
+    registry: dict,
+    *,
+    side: str,
+) -> dict:
+    mappings = {
+        item["field"]: item[side]
+        for item in comparisons
+        if item["kind"] == "context"
+    }
+    if not mappings:
+        return {}
+    context = extract_segment_context(row, mappings, registry)
+    values = {}
+    for field_ref, mapping in mappings.items():
+        if mapping["capability_id"] == CORE_CAPABILITY_ID:
+            value = context.get("core", {}).get(mapping["field"])
+        else:
+            value = (
+                context.get("extensions", {})
+                .get(mapping["extension"], {})
+                .get(mapping["field"])
+            )
+        values[field_ref] = value
+    return values
+
+
+def _apply_pivot_guard(
+    segments: list[dict],
+    rows: list[list],
+    pivot: dict,
+) -> dict:
+    if len(segments) != len(rows):
+        raise ValueError("pivot join cannot align segments with primary rows")
+    primary_keys = []
+    for segment in segments:
+        if segment.get("key_origin") != "input":
+            raise ValueError(
+                "pivot join requires a non-empty explicit business key for "
+                f"segment {segment.get('id')}"
+            )
+        primary_keys.append(segment["segment_key"])
+    primary_key_set = set(primary_keys)
+    pivot_key_set = set(pivot["rows_by_key"])
+    missing = sorted(primary_key_set - pivot_key_set)
+    extra = sorted(pivot_key_set - primary_key_set)
+    if missing or extra:
+        details = []
+        if missing:
+            details.append(f"missing pivot keys: {missing}")
+        if extra:
+            details.append(f"extra pivot keys: {extra}")
+        raise ValueError("pivot key coverage mismatch; " + "; ".join(details))
+
+    guard_rules = [
+        {"field": item["field"], "normalizer": item["normalizer"]}
+        for item in pivot["comparisons"]
+    ]
+    for segment, primary_row in zip(segments, rows):
+        key = segment["segment_key"]
+        pivot_row = pivot["rows_by_key"][key]
+        primary_context = _context_values_for_pivot(
+            primary_row,
+            pivot["comparisons"],
+            pivot["comparison_registry"],
+            side="primary",
+        )
+        pivot_context = _context_values_for_pivot(
+            pivot_row,
+            pivot["comparisons"],
+            pivot["comparison_registry"],
+            side="pivot",
+        )
+        primary_values = dict(primary_context)
+        pivot_values = dict(pivot_context)
+        for item in pivot["comparisons"]:
+            field = item["field"]
+            if item["kind"] != "builtin":
+                continue
+            primary_values[field] = {
+                "source": segment.get("source"),
+                "target": segment.get("target"),
+                "key": key,
+            }[field]
+            pivot_values[field] = _cell(
+                pivot_row, item["pivot"]["column_index"]
+            )
+        apply_pivot_comparison(
+            segment,
+            primary_values=primary_values,
+            pivot_values=pivot_values,
+            comparisons=guard_rules,
+            authority=pivot["public"]["authority"],
+        )
+
+    public = deepcopy(pivot["public"])
+    public.update(
+        {
+            "primary_keys": len(primary_key_set),
+            "pivot_keys": len(pivot_key_set),
+            "join_key_digest": input_guard_digest(sorted(primary_key_set)),
+        }
+    )
+    public["digest"] = input_guard_digest(public)
+    for segment in segments:
+        key = segment["segment_key"]
+        segment["pivot_guard_digest"] = public["digest"]
+        segment["pivot_provenance"] = {
+            "source_file_digest": public["workbook_sha256"],
+            "sheet": public["pivot_sheet"],
+            "row_index": pivot["row_indexes"][key],
+            "authority": public["authority"],
+        }
+    return public
+
+
+def _tabular_source_provenance(
+    manifest: dict,
+    *,
+    row_index: int,
+) -> dict:
+    return {
+        "adapter": manifest["adapter"],
+        "source_file_digest": manifest["input_sha256"],
+        "container": manifest.get("sheet") or Path(manifest["input_path"]).name,
+        "row_index": row_index,
+    }
+
+
+def _segment_revision(segment: dict, state_context: dict) -> str:
+    payload = {
+        "segment_key": segment.get("segment_key"),
+        "key_origin": segment.get("key_origin"),
+        "source_digest": segment.get("source_digest"),
+        "target": current_target(segment),
+        "input_status": segment.get("input_status"),
+        "input_block_reasons": segment.get("input_block_reasons", []),
+        "input_warnings": segment.get("input_warnings", []),
+        "context": segment.get("context"),
+        "resolved_constraints": segment.get("resolved_constraints", []),
+        "pivot_guard_digest": segment.get("pivot_guard_digest"),
+        "capability_resolution_digest": state_context.get(
+            "capability_resolution_digest"
+        ),
+        "project_asset_snapshot_digest": state_context.get(
+            "project_asset_snapshot_digest"
+        ),
+        "context_overrides_fingerprint": state_context.get(
+            "context_overrides_fingerprint"
+        ),
+    }
+    return source_digest(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+
+
+def _foundation_context_registry() -> dict:
+    return descriptor_registry(
+        capability_resolution={
+            "enabled": {
+                CORE_CAPABILITY_ID: {},
+                "source_provenance@1": {},
+            }
+        }
+    )
+
+
+def _registry_for_profile(
+    prof: dict | None,
+    *,
+    include_shadow: bool = False,
+) -> dict:
+    normalized = prof.get("_normalized_profile") if prof else None
+    resolution = prof.get("_capability_resolution") if prof else None
+    if normalized and resolution:
+        effective_resolution = deepcopy(resolution)
+        if not include_shadow:
+            effective_resolution["enabled"] = {
+                capability_id: item
+                for capability_id, item in resolution.get("enabled", {}).items()
+                if item.get("effect") in {"foundation", "enforce"}
+            }
+        return descriptor_registry(
+            normalized,
+            capability_resolution=effective_resolution,
+        )
+    return _foundation_context_registry()
+
+
+def _module_context_views_for_profile(prof: dict | None) -> tuple[dict, dict | None]:
+    normalized = prof.get("_normalized_profile") if prof else None
+    if not isinstance(normalized, dict):
+        return {}, None
+    views = deepcopy(normalized.get("module_context_views", {}))
+    mode = normalized.get("context_pipeline", {}).get("mode", "off")
+    if mode == "enforce":
+        return views, None
+    if mode == "shadow":
+        return {}, views
+    return {}, None
+
+
+def _legacy_segment_context(
+    segment: dict,
+    registry: dict,
+    *,
+    source_provenance: dict,
+) -> dict:
+    headers = ["content_type", "context_note"]
+    resolved = resolve_context_columns(
+        headers,
+        registry,
+        cli_columns={
+            "content_type": "content_type",
+            "context_note": "context_note",
+        },
+    )
+    return extract_segment_context(
+        [segment.get("content_type"), segment.get("context_note")],
+        resolved,
+        registry,
+        source_provenance=source_provenance,
+    )
+
+
+def _read_json_asset(path: str | Path, *, label: str) -> dict:
+    value = read_json(Path(path))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
+def _refresh_context_extension_statuses(
+    segment: dict,
+    registry: dict,
+) -> None:
+    """Re-evaluate required extension fields after verified sidecar patches."""
+
+    context = segment.get("context")
+    if not isinstance(context, dict):
+        return
+    extensions = context.get("extensions")
+    if not isinstance(extensions, dict):
+        return
+    missing = []
+    for capability_id, descriptor in registry.items():
+        if capability_id == CORE_CAPABILITY_ID:
+            continue
+        extension = capability_id.removeprefix("context.").split("@", 1)[0]
+        value = extensions.get(extension)
+        if not isinstance(value, dict) or value.get("status") in {
+            "not_applicable",
+            "disabled",
+            "conflict",
+        }:
+            continue
+        capability_missing = []
+        for field_name, field in descriptor.get("fields", {}).items():
+            if field.get("required_when_applicable") is not True:
+                continue
+            field_value = value.get(field_name)
+            if field_value in (None, "", [], {}):
+                capability_missing.append(
+                    f"context.extensions.{extension}.{field_name}"
+                )
+        value["status"] = "incomplete" if capability_missing else "ready"
+        missing.extend(capability_missing)
+    context["missing_required"] = sorted(set(missing))
+    context["status"] = "context_incomplete" if missing else "ready"
+    segment["context_provenance"] = deepcopy(context.get("provenance", {}))
+    segment["context_status"] = context["status"]
+    segment["context_missing_required"] = list(context["missing_required"])
+
+
+def _apply_runtime_project_context(
+    segments: list[dict],
+    common: dict,
+    prof: dict | None,
+    registry: dict,
+    *,
+    runtime_asset_paths: dict | None = None,
+    phase: str = "all",
+) -> list[dict]:
+    """Apply only declared, copied canonical assets to the formal context."""
+
+    if phase not in {"all", "project_overrides", "rules"}:
+        raise ValueError(f"unknown project context phase: {phase}")
+    if not prof:
+        return segments
+    mode = (common.get("context_pipeline") or {}).get("mode", "off")
+    if mode != "enforce":
+        return segments
+    snapshot = common.get("project_asset_snapshot") or {}
+    paths = runtime_asset_paths or common.get("project_asset_paths") or {}
+    enabled = (common.get("capability_resolution") or {}).get("enabled", {})
+    enabled_asset_ids = {
+        item.get("asset")
+        for item in enabled.values()
+        if isinstance(item, dict) and isinstance(item.get("asset"), str)
+    }
+    source_provenance_enabled = "source_provenance@1" in enabled
+    by_kind: dict[str, list[tuple[str, Path]]] = {}
+    for asset_id, entry in (snapshot.get("assets") or {}).items():
+        path = paths.get(asset_id)
+        kind = str(entry.get("kind"))
+        allowed = asset_id in enabled_asset_ids or (
+            kind == "project_source_manifest" and source_provenance_enabled
+        )
+        if allowed and entry.get("status") == "present" and path:
+            by_kind.setdefault(str(entry.get("kind")), []).append(
+                (asset_id, Path(path))
+            )
+    for kind in by_kind:
+        by_kind[kind].sort()
+
+    source_ids = None
+    manifests = by_kind.get("project_source_manifest", [])
+    if manifests:
+        if len(manifests) != 1:
+            raise ValueError("only one active project_source_manifest is allowed")
+        manifest = load_project_source_manifest(manifests[0][1])
+        source_ids = [item["id"] for item in manifest["sources"]]
+        common["project_source_manifest_digest"] = manifest["manifest_digest"]
+        common["project_source_manifest_path"] = common[
+            "project_asset_paths"
+        ][manifests[0][0]]
+
+    overrides = by_kind.get("segment_context_overrides", [])
+    if phase in {"all", "project_overrides"} and overrides:
+        if source_ids is None:
+            raise ValueError(
+                "segment_context_overrides requires an enabled project_source_manifest"
+            )
+        if len(overrides) != 1:
+            raise ValueError("only one active segment_context_overrides asset is allowed")
+        declared_extensions = {
+            descriptor_id: descriptor
+            for descriptor_id, descriptor in registry.items()
+            if descriptor_id != CORE_CAPABILITY_ID
+        }
+        updated = apply_segment_context_overrides(
+            _read_json_asset(overrides[0][1], label="segment_context_overrides"),
+            segments=segments,
+            declared_extensions=declared_extensions,
+            source_ids=source_ids,
+        )
+        segments = updated
+        for segment in segments:
+            context = segment.get("context")
+            if not isinstance(context, dict):
+                continue
+            sidecar_provenance = segment.pop("provenance", {})
+            if isinstance(sidecar_provenance, dict):
+                context.setdefault("provenance", {}).update(sidecar_provenance)
+            _refresh_context_extension_statuses(segment, registry)
+        common["segment_context_overrides_digest"] = input_guard_digest(
+            _read_json_asset(overrides[0][1], label="segment_context_overrides")
+        )
+
+    rule_assets = by_kind.get("context_rules", [])
+    if phase in {"all", "rules"} and rule_assets:
+        if len(rule_assets) != 1:
+            raise ValueError("only one active context_rules asset is allowed")
+        target_lang = common.get("target_lang")
+        rules = validate_context_rules(
+            _read_json_asset(rule_assets[0][1], label="context_rules"),
+            target_lang=target_lang,
+        )
+        enabled = (common.get("capability_resolution") or {}).get("enabled", {})
+        policy_capabilities = [
+            (capability_id, resolution)
+            for capability_id, resolution in enabled.items()
+            if capability_id.startswith("language_policy.")
+            and resolution.get("effect") == "enforce"
+        ]
+        for capability_id, resolution in policy_capabilities:
+            provider = resolution.get("provider")
+            if not isinstance(provider, dict):
+                raise ValueError(
+                    f"enabled language policy {capability_id} lacks provider binding"
+                )
+            provider_ref = {
+                "id": provider["id"],
+                "api_version": provider["api_version"],
+            }
+            for segment in segments:
+                evaluation = evaluate_language_policy(
+                    rules,
+                    segment.get("context", {}),
+                    current_target(segment),
+                    provider=provider_ref,
+                    target_lang=target_lang,
+                    as_of=common.get("created_at"),
+                )
+                constraint = deepcopy(evaluation["constraint"])
+                constraint["runtime_evaluation"] = {
+                    "status": evaluation["status"],
+                    "reason_codes": deepcopy(evaluation.get("reason_codes", [])),
+                    "observation": deepcopy(evaluation.get("observation")),
+                    "evaluation": deepcopy(evaluation.get("evaluation")),
+                    "evaluation_digest": evaluation["evaluation_digest"],
+                }
+                segment.setdefault("resolved_constraints", []).append(constraint)
+                segment.setdefault("constraint_evaluations", []).append(
+                    evaluation
+                )
+        common["context_rules_digest"] = input_guard_digest(rules)
+    return segments
+
+
+def _apply_explicit_context_overrides(
+    args,
+    segments: list[dict],
+    common: dict,
+    registry: dict,
+    *,
+    shadow_registry: dict | None,
+    staging_dir: Path,
+    job_dir: Path,
+    staged_project_asset_paths: dict,
+) -> tuple[list[dict], dict | None, dict | None, tuple[Path, str] | None]:
+    source_path = getattr(args, "context_overrides", None)
+    if not source_path:
+        return segments, None, None, None
+    result = load_and_apply_job_context_overrides(
+        source_path,
+        segments=segments,
+        registry=registry,
+        capability_resolution_digest=common.get("capability_resolution_digest"),
+    )
+    segments = result["segments"]
+    published_sidecar = job_dir / "context_overrides.json"
+    staged_sidecar = staging_dir / published_sidecar.name
+    staged_sidecar.write_text(
+        json.dumps(result["document"], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    audit = deepcopy(result["audit"])
+    audit["path"] = str(published_sidecar)
+    report_state = {
+        **common,
+        "job_runtime_contract_version": JOB_RUNTIME_CONTRACT_VERSION,
+        "resolved_context_descriptors": registry,
+        "shadow_context_descriptors": shadow_registry,
+        "project_asset_paths": staged_project_asset_paths,
+        "segments": segments,
+    }
+    gap_report = build_context_gap_report(report_state)
+    published_gap_report = job_dir / "context_gap_report.json"
+    staged_gap_report = staging_dir / published_gap_report.name
+    staged_gap_report.write_text(
+        json.dumps(gap_report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    common.update(
+        {
+            "context_overrides": audit,
+            "context_overrides_path": str(published_sidecar),
+            "context_overrides_digest": audit["document_digest"],
+            "context_overrides_fingerprint": audit["fingerprint"],
+            "context_runtime_fingerprint": audit["fingerprint"],
+            "context_gap_report_path": str(published_gap_report),
+            "context_gap_report_digest": gap_report["report_digest"],
+        }
+    )
+    guard = (Path(result["source_path"]), audit["source_file_sha256"])
+    return segments, audit, gap_report, guard
+
+
+def _extract_text_type_marker(
+    src,
+    tgt=None,
+    content_type=None,
+    *,
+    rules: list[dict] | None = None,
+):
+    """Apply only profile-declared marker rows; ordinary text is never inferred."""
+
+    source = _text(src)
+    for rule in rules or []:
+        if source != rule["source_equals"]:
+            continue
+        if "text_type_context" in rule:
+            return rule["text_type_context"]
+        values = {
+            "source": source,
+            "target": _text(tgt),
+            "content_type": _text(content_type),
+        }
+        marker = values[rule["text_type_from"]]
+        if not marker:
+            raise ValueError(
+                f"text type marker rule {rule['id']!r} resolved to an empty value"
+            )
+        return marker
     return None
 
 
@@ -588,19 +1703,23 @@ def _prepare_read_assets(
 
     checks_path = confirmed_rules_path = ""
     if prof:
-        checks = Path(_project_path(prof, prof.get("checks", "checks.json")))
-        checks_path = str(checks) if checks.exists() else ""
-        confirmed = Path(
-            _project_path(prof, prof.get("confirmed_rules", "confirmed_rules.md"))
+        active_checks = _active_profile_asset_path(prof, "checks")
+        active_confirmed = _active_profile_asset_path(prof, "confirmed_rules")
+        checks = Path(active_checks) if active_checks else None
+        checks_path = str(checks) if checks is not None and checks.exists() else ""
+        confirmed = Path(active_confirmed) if active_confirmed else None
+        common_confirmed = (
+            confirmed.parent.parent / "common" / "confirmed_rules_common.md"
+            if confirmed is not None
+            else Path(prof["_dir"]).parent / "common" / "confirmed_rules_common.md"
         )
-        common_confirmed = confirmed.parent.parent / "common" / "confirmed_rules_common.md"
         parts = []
         if common_confirmed.exists():
             parts.append(
                 f"<!-- ===== 共通确认规则（游戏级）: {common_confirmed.name} ===== -->\n"
                 + common_confirmed.read_text(encoding="utf-8")
             )
-        if confirmed.exists():
+        if confirmed is not None and confirmed.exists():
             parts.append(
                 f"<!-- ===== 语言专有确认规则: {confirmed} ===== -->\n"
                 + confirmed.read_text(encoding="utf-8")
@@ -629,7 +1748,81 @@ def _prepare_read_assets(
         profile_policy["threshold"] = prof["threshold"]
     scoring_policy = resolve_scoring_policy({}, profile_policy)
 
+    normalized_profile = prof.get("_normalized_profile") if prof else None
+    asset_inspection = prof.get("_asset_inspection") if prof else None
+    capability_resolution = prof.get("_capability_resolution") if prof else None
+    if normalized_profile is None:
+        runtime_profile = {
+            "name": "runtime/unprofiled",
+            "language_pair": (
+                f"{source_lang}-{target_lang}"
+                if source_lang and target_lang
+                else "und-und"
+            ),
+            "source_lang": source_lang or "und",
+            "target_lang": target_lang or "und",
+            "wordcount_basis": basis,
+        }
+        normalized_profile = normalize_profile(runtime_profile)
+        asset_inspection = inspect_project_assets(
+            normalized_profile,
+            profile_dir=write_dir,
+            allow_outside_root=True,
+            strict_required=True,
+        )
+        capability_resolution = resolve_capabilities(
+            normalized_profile,
+            asset_statuses=asset_statuses(asset_inspection["snapshot"]),
+            provider_registry=trusted_provider_registry(),
+        )
+    module_context_views, shadow_module_context_views = (
+        _module_context_views_for_profile(prof)
+        if prof
+        else ({}, None)
+    )
+    project_asset_snapshot = (
+        deepcopy(asset_inspection.get("snapshot"))
+        if isinstance(asset_inspection, dict)
+        else None
+    )
+    capability_resolution_path = ""
+    project_asset_snapshot_path = ""
+    if isinstance(capability_resolution, dict):
+        staged_file = write_dir / "capability_resolution.json"
+        published_file = final_dir / "capability_resolution.json"
+        staged_file.write_text(
+            json.dumps(capability_resolution, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        capability_resolution_path = str(published_file)
+    if isinstance(project_asset_snapshot, dict):
+        staged_file = write_dir / "project_asset_snapshot.json"
+        published_file = final_dir / "project_asset_snapshot.json"
+        staged_file.write_text(
+            json.dumps(project_asset_snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        project_asset_snapshot_path = str(published_file)
+
+    project_assets_path = ""
+    copied_project_assets = {}
+    if isinstance(asset_inspection, dict):
+        staged_root = write_dir / "project_assets"
+        copied = copy_project_assets(asset_inspection, staged_root)
+        if copied:
+            project_assets_path = str(final_dir / "project_assets")
+            copied_project_assets = {
+                asset_id: str(
+                    final_dir / "project_assets" / asset_id / path.name
+                )
+                for asset_id, path in copied.items()
+            }
+
     return {
+        "job_runtime_contract_version": JOB_RUNTIME_CONTRACT_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "context_contract_version": 1,
+        "input_guard_version": 1,
         "aipe_url": None,
         "check_scope": check_scope,
         "review_policy": review_policy,
@@ -652,7 +1845,70 @@ def _prepare_read_assets(
         "wordcount": wordcount,
         "wordcount_basis": basis,
         "iteration": 0,
+        "profile_contract_version": (
+            normalized_profile.get("profile_contract_version")
+            if isinstance(normalized_profile, dict)
+            else 1
+        ),
+        "profile_digest": (
+            normalized_profile.get("source_profile_digest")
+            if isinstance(normalized_profile, dict)
+            else None
+        ),
+        "profile_overlay_digest": (
+            file_sha256(Path(prof["_overlay_path"]))
+            if prof and prof.get("_overlay_path")
+            else None
+        ),
+        "context_pipeline": deepcopy(
+            (normalized_profile or {}).get("context_pipeline", {"mode": "off"})
+        ),
+        "module_context_views": module_context_views,
+        **(
+            {"shadow_module_context_views": shadow_module_context_views}
+            if shadow_module_context_views is not None
+            else {}
+        ),
+        "normalized_capabilities": deepcopy(
+            (normalized_profile or {}).get("capabilities", {})
+        ),
+        "capability_descriptors": deepcopy(
+            (normalized_profile or {}).get("capability_descriptors", {})
+        ),
+        "capability_resolution": deepcopy(capability_resolution),
+        "capability_resolution_digest": (
+            capability_resolution.get("digest")
+            if isinstance(capability_resolution, dict)
+            else None
+        ),
+        "capability_resolution_path": capability_resolution_path,
+        "project_asset_snapshot": project_asset_snapshot,
+        "project_asset_snapshot_digest": (
+            project_asset_snapshot.get("digest")
+            if isinstance(project_asset_snapshot, dict)
+            else None
+        ),
+        "project_asset_snapshot_path": project_asset_snapshot_path,
+        "project_assets_path": project_assets_path,
+        "project_asset_paths": copied_project_assets,
     }
+
+
+def _staged_asset_replacements(
+    staging_dir: Path,
+    job_dir: Path,
+    *,
+    exclude: set[Path] | None = None,
+) -> list[tuple[Path, Path]]:
+    excluded = {path.resolve() for path in (exclude or set())}
+    replacements = []
+    for source in sorted(staging_dir.rglob("*")):
+        if not source.is_file() or source.resolve() in excluded:
+            continue
+        destination = job_dir / source.relative_to(staging_dir)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        replacements.append((source, destination))
+    return replacements
 
 
 def _language_values_match(first: str, second: str) -> bool:
@@ -858,7 +2114,55 @@ def _read_sdlxliff_job(
         metadata = segment["metadata"]["sdlxliff"]
         metadata["content_type"] = segment.get("content_type")
         segment["context_note"] = metadata.get("comment") or None
+        source_ref = segment.get("source_ref") or {}
+        business_parts = [
+            source_ref.get("relative_path"),
+            source_ref.get("tu_id", source_ref.get("tu_index")),
+            source_ref.get("sdl_segment_id", source_ref.get("segment_index")),
+        ]
+        identity = build_segment_identity(
+            business_key="::".join(str(part) for part in business_parts),
+            input_digest=source_digest(segment.get("source", "")),
+            container=str(source_ref.get("relative_path") or "sdlxliff"),
+            row_index=segment["id"],
+        )
+        segment.update(identity)
+        segment["source_digest"] = source_digest(segment.get("source", ""))
+        segment["input_status"] = "ready"
+        segment["source_provenance"] = {
+            "adapter": "sdlxliff@1",
+            "source_ref": deepcopy(source_ref),
+        }
         segment["iter"] = 0
+
+    context_registry = _registry_for_profile(prof)
+    resolution = prof.get("_capability_resolution") if prof else None
+    shadow_registry = (
+        _registry_for_profile(prof, include_shadow=True)
+        if resolution
+        and resolution.get("context_pipeline_mode") == "shadow"
+        else None
+    )
+    for segment in result.segments:
+        segment["context"] = _legacy_segment_context(
+            segment,
+            context_registry,
+            source_provenance=segment["source_provenance"],
+        )
+        segment["context_provenance"] = deepcopy(
+            segment["context"].get("provenance", {})
+        )
+        segment["context_status"] = segment["context"].get("status", "ready")
+        segment["context_missing_required"] = segment["context"].get(
+            "missing_required", []
+        )
+        segment["resolved_constraints"] = []
+        if shadow_registry is not None:
+            segment["shadow_context"] = _legacy_segment_context(
+                segment,
+                shadow_registry,
+                source_provenance=segment["source_provenance"],
+            )
 
     job_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -876,6 +2180,82 @@ def _read_sdlxliff_job(
             asset_dir=staging_dir,
             publish_dir=job_dir,
         )
+        staged_project_asset_paths = {
+            asset_id: str(
+                staging_dir
+                / "project_assets"
+                / asset_id
+                / Path(published_path).name
+            )
+            for asset_id, published_path in common.get(
+                "project_asset_paths", {}
+            ).items()
+        }
+        result.segments = _apply_runtime_project_context(
+            result.segments,
+            common,
+            prof,
+            context_registry,
+            runtime_asset_paths=staged_project_asset_paths,
+            phase="project_overrides",
+        )
+        (
+            result.segments,
+            context_overrides_audit,
+            context_gap_report,
+            context_overrides_guard,
+        ) = _apply_explicit_context_overrides(
+            args,
+            result.segments,
+            common,
+            context_registry,
+            shadow_registry=shadow_registry,
+            staging_dir=staging_dir,
+            job_dir=job_dir,
+            staged_project_asset_paths=staged_project_asset_paths,
+        )
+        result.segments = _apply_runtime_project_context(
+            result.segments,
+            common,
+            prof,
+            context_registry,
+            runtime_asset_paths=staged_project_asset_paths,
+            phase="rules",
+        )
+        shadow_context_artifact = None
+        if shadow_registry is not None:
+            shadow_context_artifact = build_shadow_context_artifact(
+                common,
+                result.segments,
+                shadow_registry,
+            )
+            staged_shadow = staging_dir / "shadow_context" / "context.json"
+            staged_shadow.parent.mkdir(parents=True, exist_ok=True)
+            staged_shadow.write_text(
+                json.dumps(
+                    shadow_context_artifact,
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        for segment in result.segments:
+            segment["segment_revision_digest"] = _segment_revision(
+                segment, common
+            )
+            segment["module_review_equivalence_keys"] = {
+                module: module_review_equivalence_key(
+                    segment, module, context_registry
+                )
+                for module in (
+                    "terminology",
+                    "precheck_review",
+                    "accuracy",
+                    "grammar",
+                    "naturalness",
+                    "suggestions",
+                )
+            }
         manifest_path = job_dir / "source_manifest.json"
         candidates_path = job_dir / "tm_candidates.json"
         candidates = {
@@ -901,14 +2281,46 @@ def _read_sdlxliff_job(
             "headers": result.headers,
             "rows_raw": result.rows_raw,
             "text_type_markers": [],
+            "resolved_context_descriptors": context_registry,
+            "shadow_context_descriptors": shadow_registry,
+            **(
+                {
+                    "shadow_context_path": str(
+                        job_dir / "shadow_context" / "context.json"
+                    ),
+                    "shadow_context_digest": shadow_context_artifact[
+                        "artifact_digest"
+                    ],
+                }
+                if shadow_context_artifact is not None
+                else {}
+            ),
             **common,
             "segments": result.segments,
         }
+        state["input_guard"] = input_guard_summary(result.segments)
+        state["review_wordcount"] = state["wordcount"]
+        if context_overrides_audit is not None:
+            result.manifest["context_overrides"] = deepcopy(
+                context_overrides_audit
+            )
+            result.manifest["context_gap_report"] = {
+                "path": common["context_gap_report_path"],
+                "digest": context_gap_report["report_digest"],
+                "summary": deepcopy(context_gap_report["summary"]),
+            }
         staged_assets = {
-            job_dir / path.name: path
-            for path in staging_dir.iterdir()
-            if path.is_file()
+            destination: source
+            for source, destination in _staged_asset_replacements(
+                staging_dir, job_dir
+            )
         }
+        if context_overrides_guard is not None:
+            override_path, expected_digest = context_overrides_guard
+            if file_sha256(override_path) != expected_digest:
+                raise ValueError(
+                    f"context overrides changed while input was being read: {override_path}"
+                )
         _publish_sdlxliff_job(
             state_path,
             manifest=result.manifest,
@@ -952,6 +2364,11 @@ def _cmd_read_locked(args):
         "lang_notes.md",
         "background.md",
         "confirmed_rules.md",
+        "capability_resolution.json",
+        "project_asset_snapshot.json",
+        "tabular_source_manifest.json",
+        "context_overrides.json",
+        "context_gap_report.json",
     }
     if out_path.name.casefold() in generated_asset_names:
         print(
@@ -976,16 +2393,45 @@ def _cmd_read_locked(args):
             file=sys.stderr,
         )
         sys.exit(2)
+    tabular_only_options = {
+        "--sheet": getattr(args, "sheet", None),
+        "--key-col": getattr(args, "key_col", None),
+        "--context-col": getattr(args, "context_cols", None),
+        "--pivot-sheet": getattr(args, "pivot_sheet", None),
+        "--pivot-key-col": getattr(args, "pivot_key_col", None),
+        "--pivot-compare": getattr(args, "pivot_compare", None),
+        "--pivot-authority": getattr(args, "pivot_authority", None),
+        "--target-source-digest-col": getattr(
+            args, "target_source_digest_col", None
+        ),
+    }
+    if input_format == "sdlxliff" and any(
+        value not in (None, [], "") for value in tabular_only_options.values()
+    ):
+        invalid = [
+            flag for flag, value in tabular_only_options.items()
+            if value not in (None, [], "")
+        ]
+        print(
+            "[ERROR] tabular-only options are not valid for SDLXLIFF: "
+            + ", ".join(invalid),
+            file=sys.stderr,
+        )
+        sys.exit(2)
     prof = _load_project(args.project) if getattr(args, "project", None) else None
     if prof:
+        if getattr(args, "profile_overlay", None):
+            prof = _load_profile_overlay(args.profile_overlay, prof)
         _validate_project_profile(prof)
-        if not args.style_guide and prof.get("style_guide"):
-            args.style_guide = _project_path(prof, prof["style_guide"])
-        if prof.get("terminology"):
+        active_style = _active_profile_asset_path(prof, "style_guide")
+        active_terms = _active_profile_asset_path(prof, "terminology")
+        if not args.style_guide and active_style:
+            args.style_guide = active_style
+        if active_terms:
             if not check_scope["terminology_enabled"]:
                 print("[lqe_io] profile terminology overridden by --no-terminology")
             elif not args.terminology:
-                args.terminology = _project_path(prof, prof["terminology"])
+                args.terminology = active_terms
         print(f"[lqe_io] project: {prof.get('name', '?')} ({prof.get('language_pair', '?')})")
 
     protected_inputs = {
@@ -996,6 +2442,8 @@ def _cmd_read_locked(args):
         protected_inputs["--style-guide"] = Path(args.style_guide)
     if args.terminology:
         protected_inputs["--terminology"] = Path(args.terminology)
+    if getattr(args, "context_overrides", None):
+        protected_inputs["--context-overrides"] = Path(args.context_overrides)
     planned_outputs = {
         "state": out_path,
         "scope": scope_path,
@@ -1004,7 +2452,20 @@ def _cmd_read_locked(args):
         "language notes copy": job_dir / "lang_notes.md",
         "background copy": job_dir / "background.md",
         "confirmed rules copy": job_dir / "confirmed_rules.md",
+        "capability resolution": job_dir / "capability_resolution.json",
+        "project asset snapshot": job_dir / "project_asset_snapshot.json",
     }
+    if getattr(args, "context_overrides", None):
+        planned_outputs.update(
+            {
+                "context overrides copy": job_dir / "context_overrides.json",
+                "context gap report": job_dir / "context_gap_report.json",
+            }
+        )
+    if input_format == "tabular":
+        planned_outputs["tabular source manifest"] = (
+            job_dir / "tabular_source_manifest.json"
+        )
     if input_format == "sdlxliff":
         planned_outputs.update(
             {
@@ -1046,48 +2507,100 @@ def _cmd_read_locked(args):
     no_header = getattr(args, "no_header", False)
     input_path = Path(args.input)
     input_sha256 = file_sha256(input_path)
-    suffix = input_path.suffix.lower()
-
-    if suffix in (".csv", ".tsv"):
-        delim = "\t" if suffix == ".tsv" else ","
-        raw_rows = list(csv.reader(io.StringIO(input_path.read_bytes().decode("utf-8-sig")), delimiter=delim))
-        if not raw_rows:
-            print("[ERROR] No data rows found.", file=sys.stderr)
-            sys.exit(1)
-        width = max(len(r) for r in raw_rows)
-        if no_header:
-            default_headers = ["Key", "Source", "Target", "Status", "Comment", "Scope", "File", "Reviewer Note"]
-            headers = [default_headers[j] if j < len(default_headers) else f"col{j}" for j in range(width)]
-            data_rows = raw_rows
-        else:
-            headers = [str(h).strip() if h is not None else "" for h in raw_rows[0]]
-            data_rows = raw_rows[1:]
-    else:
-        wb = openpyxl.load_workbook(args.input)
-        ws = wb.active
-        if no_header:
-            default_headers = ["Key", "Source", "Target", "Status", "Comment", "Scope", "File", "Reviewer Note"]
-            headers = [default_headers[j] if j < len(default_headers) else f"col{j}" for j in range(ws.max_column)]
-            data_rows = list(ws.iter_rows(min_row=1, values_only=True))
-        else:
-            headers = [cell.value for cell in ws[1]]
-            data_rows = list(ws.iter_rows(min_row=2, values_only=True))
-
-    if no_header:
-        # 列参数为整数索引（0-based）
-        try:
-            si = int(args.source_col)
-            ti = int(args.target_col)
-        except ValueError:
-            print("[ERROR] --no-header mode requires integer column indices for --source-col and --target-col", file=sys.stderr)
-            sys.exit(1)
-    else:
-        for col in [args.source_col, args.target_col]:
-            if col not in headers:
-                print(f"[ERROR] Column '{col}' not found. Available: {headers}", file=sys.stderr)
-                sys.exit(1)
-        si = headers.index(args.source_col)
-        ti = headers.index(args.target_col)
+    try:
+        headers, data_rows, container, source_manifest = _read_tabular_source(
+            input_path,
+            sheet_name=getattr(args, "sheet", None),
+            no_header=no_header,
+        )
+        if not data_rows:
+            raise ValueError("no data rows found")
+        widths = {len(row) for row in data_rows if any(_text(cell) for cell in row)}
+        if len(widths) > 1:
+            raise ValueError(f"tabular input has inconsistent row widths: {sorted(widths)}")
+        si = _resolve_input_column(
+            headers, args.source_col, no_header=no_header, label="--source-col"
+        )
+        ti = _resolve_input_column(
+            headers, args.target_col, no_header=no_header, label="--target-col"
+        )
+        key_index = (
+            _resolve_input_column(
+                headers,
+                args.key_col,
+                no_header=no_header,
+                label="--key-col",
+            )
+            if getattr(args, "key_col", None) is not None
+            else None
+        )
+        digest_index = (
+            _resolve_input_column(
+                headers,
+                args.target_source_digest_col,
+                no_header=no_header,
+                label="--target-source-digest-col",
+            )
+            if getattr(args, "target_source_digest_col", None) is not None
+            else None
+        )
+        normalized_profile = prof.get("_normalized_profile") if prof else None
+        text_type_marker_rules = deepcopy(
+            (normalized_profile or {})
+            .get("tabular", {})
+            .get("text_type_marker_rules", [])
+        )
+        resolution = prof.get("_capability_resolution") if prof else None
+        registry = _registry_for_profile(prof)
+        shadow_registry = (
+            _registry_for_profile(prof, include_shadow=True)
+            if resolution
+            and resolution.get("context_pipeline_mode") == "shadow"
+            else None
+        )
+        context_cli_specs = _context_cli_specs(args)
+        shadow_context_columns = (
+            resolve_context_columns(
+                headers,
+                shadow_registry,
+                cli_columns=context_cli_specs,
+                profile=normalized_profile,
+                no_header=no_header,
+            )
+            if shadow_registry is not None
+            else None
+        )
+        formal_context_cli_specs = (
+            _context_cli_specs_for_registry(
+                context_cli_specs,
+                source_registry=shadow_registry,
+                target_registry=registry,
+            )
+            if shadow_registry is not None
+            else context_cli_specs
+        )
+        resolved_context_columns = resolve_context_columns(
+            headers,
+            registry,
+            cli_columns=formal_context_cli_specs,
+            profile=normalized_profile,
+            no_header=no_header,
+        )
+        pivot_guard_config = _prepare_pivot_guard(
+            args,
+            input_path=input_path,
+            main_container=container,
+            main_headers=headers,
+            source_index=si,
+            target_index=ti,
+            key_index=key_index,
+            resolved_context_columns=resolved_context_columns,
+            registry=registry,
+            no_header=no_header,
+        )
+    except (ContextContractError, OSError, ValueError, XLSImportError) as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # R3: 自动识别 max-length 列（UI 字段宽度上限），用于逐元素截断检查
     mi = None
@@ -1107,20 +2620,47 @@ def _cmd_read_locked(args):
         else:
             print(f"[lqe_io] group column: '{headers[gi]}' (col {gi})")
 
-    ci = None
-    for idx, h in enumerate(headers):
-        if h is not None and str(h).strip().lower() in {"content_type", "text_type", "文本类型", "文本类别"}:
-            ci = idx
-            break
-
     segments, rows_raw, text_type_markers = [], [], []
     text_type_context = None
     for i, row in enumerate(data_rows):
         if any(_text(c) for c in row):
             src = _text(_cell(row, si))
             tgt = _text(_cell(row, ti))
-            row_content_type = _text(_cell(row, ci)) if ci is not None else ""
-            marker = _extract_text_type_marker(src, tgt, row_content_type)
+            context_state = extract_segment_context(
+                row,
+                resolved_context_columns,
+                registry,
+                profile=normalized_profile,
+                source_provenance=_tabular_source_provenance(
+                    source_manifest, row_index=i
+                ),
+            )
+            shadow_context_state = (
+                extract_segment_context(
+                    row,
+                    shadow_context_columns,
+                    shadow_registry,
+                    profile=normalized_profile,
+                    source_provenance=_tabular_source_provenance(
+                        source_manifest, row_index=i
+                    ),
+                )
+                if shadow_registry is not None
+                else None
+            )
+            row_content_type = _text(
+                context_state.get("core", {}).get("content_type")
+            )
+            try:
+                marker = _extract_text_type_marker(
+                    src,
+                    tgt,
+                    row_content_type,
+                    rules=text_type_marker_rules,
+                )
+            except ValueError as exc:
+                print(f"[ERROR] {exc}", file=sys.stderr)
+                sys.exit(1)
             if marker:
                 text_type_context = marker
                 text_type_markers.append({
@@ -1131,22 +2671,64 @@ def _cmd_read_locked(args):
                 })
                 continue
             seg_id = len(segments)
-            segments.append({
+            identity = build_segment_identity(
+                business_key=_cell(row, key_index),
+                input_digest=input_sha256,
+                container=container,
+                row_index=i,
+            )
+            segment = {
                 "id": seg_id,
                 "row_index": i,
+                **identity,
                 "source": src,
                 "target": tgt,
                 "corrected": None,
                 "content_type": row_content_type or None,
                 "text_type_context": text_type_context,
+                "context": context_state,
+                "context_provenance": deepcopy(
+                    context_state.get("provenance", {})
+                ),
+                "context_status": context_state.get("status", "ready"),
+                "context_missing_required": context_state.get(
+                    "missing_required", []
+                ),
+                "source_digest": source_digest(src),
+                "input_status": "ready",
+                "source_provenance": _tabular_source_provenance(
+                    source_manifest, row_index=i
+                ),
+                "resolved_constraints": [],
                 "max_len": _parse_maxlen(row[mi]) if mi is not None and mi < len(row) else None,
                 "group": (str(row[gi]).strip() if gi is not None and gi < len(row) and row[gi] is not None and str(row[gi]).strip() else None),
                 "iter": 0,
-            })
+            }
+            if shadow_context_state is not None:
+                segment["shadow_context"] = shadow_context_state
+            if digest_index is not None:
+                apply_target_source_digest_guard(
+                    segment, _cell(row, digest_index)
+                )
+            else:
+                segment["input_warnings"] = [
+                    {"code": "UNVERIFIED_TARGET_PROVENANCE"}
+                ]
+            segments.append(segment)
             rows_raw.append(list(row))
 
     if not segments:
         print("[ERROR] No data rows found.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        ensure_unique_business_keys(segments)
+        pivot_guard = (
+            _apply_pivot_guard(segments, rows_raw, pivot_guard_config)
+            if pivot_guard_config is not None
+            else None
+        )
+    except ValueError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
     source_lang = _source_lang({"source_lang": getattr(args, "source_lang", None)}) \
@@ -1170,19 +2752,196 @@ def _cmd_read_locked(args):
                 asset_dir=staging_dir,
                 publish_dir=job_dir,
             )
+            staged_project_asset_paths = {
+                asset_id: str(
+                    staging_dir
+                    / "project_assets"
+                    / asset_id
+                    / Path(published_path).name
+                )
+                for asset_id, published_path in common.get(
+                    "project_asset_paths", {}
+                ).items()
+            }
+            segments = _apply_runtime_project_context(
+                segments,
+                common,
+                prof,
+                registry,
+                runtime_asset_paths=staged_project_asset_paths,
+                phase="project_overrides",
+            )
+            (
+                segments,
+                context_overrides_audit,
+                context_gap_report,
+                context_overrides_guard,
+            ) = _apply_explicit_context_overrides(
+                args,
+                segments,
+                common,
+                registry,
+                shadow_registry=shadow_registry,
+                staging_dir=staging_dir,
+                job_dir=job_dir,
+                staged_project_asset_paths=staged_project_asset_paths,
+            )
+            segments = _apply_runtime_project_context(
+                segments,
+                common,
+                prof,
+                registry,
+                runtime_asset_paths=staged_project_asset_paths,
+                phase="rules",
+            )
+
+            for segment in segments:
+                segment["segment_revision_digest"] = _segment_revision(
+                    segment, common
+                )
+                segment["module_review_equivalence_keys"] = {
+                    module: module_review_equivalence_key(
+                        segment, module, registry
+                    )
+                    for module in (
+                        "terminology",
+                        "precheck_review",
+                        "accuracy",
+                        "grammar",
+                        "naturalness",
+                        "suggestions",
+                    )
+                }
+            total_wordcount = common["wordcount"]
+            review_segments = [
+                segment
+                for segment in segments
+                if segment.get("input_status") != "blocked"
+            ]
+            if common["wordcount_basis"] == "source-chars":
+                review_wordcount = sum(
+                    len(_RE_CJK.findall(segment.get("source", "")))
+                    + len(re.findall(r"[A-Za-z0-9]+", segment.get("source", "")))
+                    for segment in review_segments
+                )
+            else:
+                review_wordcount = sum(
+                    len(segment.get("target", "").split())
+                    for segment in review_segments
+                )
+            common["wordcount"] = total_wordcount
+            common["review_wordcount"] = review_wordcount
+            common["review_wordcount_basis_digest"] = source_digest(
+                json.dumps(
+                    {
+                        "wordcount": total_wordcount,
+                        "review_wordcount": review_wordcount,
+                        "blocked_ids": [
+                            segment["id"]
+                            for segment in segments
+                            if segment.get("input_status") == "blocked"
+                        ],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            shadow_context_artifact = None
+            if shadow_registry is not None:
+                shadow_context_artifact = build_shadow_context_artifact(
+                    common,
+                    segments,
+                    shadow_registry,
+                )
+                staged_shadow = staging_dir / "shadow_context" / "context.json"
+                staged_shadow.parent.mkdir(parents=True, exist_ok=True)
+                staged_shadow.write_text(
+                    json.dumps(
+                        shadow_context_artifact,
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            tabular_manifest_path = job_dir / "tabular_source_manifest.json"
+            staged_manifest = staging_dir / tabular_manifest_path.name
+            source_manifest.update(
+                {
+                    "source_col": args.source_col,
+                    "target_col": args.target_col,
+                    "key_col": getattr(args, "key_col", None),
+                    "group_col": getattr(args, "group_col", None),
+                    "target_source_digest_col": getattr(
+                        args, "target_source_digest_col", None
+                    ),
+                    "context_columns": resolved_context_columns,
+                    "shadow_context_columns": shadow_context_columns,
+                    "text_type_marker_rules": text_type_marker_rules,
+                    "segments": len(segments),
+                    **(
+                        {"pivot_guard": pivot_guard}
+                        if pivot_guard is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "context_overrides": deepcopy(
+                                context_overrides_audit
+                            ),
+                            "context_gap_report": {
+                                "path": common["context_gap_report_path"],
+                                "digest": context_gap_report["report_digest"],
+                                "summary": deepcopy(
+                                    context_gap_report["summary"]
+                                ),
+                            },
+                        }
+                        if context_overrides_audit is not None
+                        else {}
+                    ),
+                }
+            )
+            staged_manifest.write_text(
+                json.dumps(source_manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
             state = {
                 "artifact_contract_version": 1,
                 "input_format": "tabular",
                 "input_path": str(Path(args.input).resolve()),
                 "input_sha256": input_sha256,
+                "sheet_name": container,
+                "tabular_source_manifest_path": str(tabular_manifest_path),
                 "no_header": bool(no_header),
                 "source_col": args.source_col,
                 "target_col": args.target_col,
                 "headers": headers,
                 "rows_raw": rows_raw,
                 "text_type_markers": text_type_markers,
+                "text_type_marker_rules": text_type_marker_rules,
+                "context_cols": resolved_context_columns,
+                "resolved_context_descriptors": registry,
+                "shadow_context_descriptors": shadow_registry,
+                **(
+                    {
+                        "shadow_context_path": str(
+                            job_dir / "shadow_context" / "context.json"
+                        ),
+                        "shadow_context_digest": shadow_context_artifact[
+                            "artifact_digest"
+                        ],
+                    }
+                    if shadow_context_artifact is not None
+                    else {}
+                ),
+                **(
+                    {"pivot_guard": pivot_guard}
+                    if pivot_guard is not None
+                    else {}
+                ),
                 **common,
+                "input_guard": input_guard_summary(segments),
                 "segments": segments,
             }
             staged_scope = staging_dir / "scope.json"
@@ -1195,11 +2954,11 @@ def _cmd_read_locked(args):
                 json.dumps(state, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            asset_replacements = [
-                (path, job_dir / path.name)
-                for path in staging_dir.iterdir()
-                if path.is_file() and path not in {staged_scope, staged_state}
-            ]
+            asset_replacements = _staged_asset_replacements(
+                staging_dir,
+                job_dir,
+                exclude={staged_scope, staged_state},
+            )
             input_paths = [Path(args.input)]
             for configured in (args.style_guide, args.terminology):
                 if configured:
@@ -1215,6 +2974,13 @@ def _cmd_read_locked(args):
                 raise ValueError(
                     f"tabular input changed while it was being read: {input_path}"
                 )
+            if context_overrides_guard is not None:
+                override_path, expected_digest = context_overrides_guard
+                if file_sha256(override_path) != expected_digest:
+                    raise ValueError(
+                        "context overrides changed while input was being read: "
+                        f"{override_path}"
+                    )
             publish_replacement_transaction(
                 [
                     *sorted(asset_replacements, key=lambda item: str(item[1])),
@@ -1242,6 +3008,469 @@ def cmd_read(args):
             _cmd_read_locked(args)
     except (OSError, ValueError) as exc:
         raise SystemExit(f"[read] {exc}") from exc
+
+
+def _reread_asset_path(old_job: Path, value: object, label: str) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"historical state is missing {label}")
+    path = Path(value)
+    if not path.is_absolute():
+        path = old_job / path
+    if not path.is_file():
+        raise ValueError(f"historical {label} is missing: {path}")
+    return path
+
+
+def _reread_segment_signature(segment: dict, input_format: str) -> tuple:
+    if not isinstance(segment, dict):
+        raise ValueError("historical state has a non-object segment")
+    source = segment.get("source")
+    target = segment.get("target")
+    if not isinstance(source, str) or not isinstance(target, str):
+        raise ValueError("historical segment source/target must be strings")
+    if input_format == "tabular":
+        row_index = segment.get("row_index", segment.get("id"))
+        if type(row_index) is not int or row_index < 0:
+            raise ValueError("historical tabular segment has no valid row_index")
+        location = row_index
+    else:
+        source_ref = segment.get("source_ref")
+        if not isinstance(source_ref, dict):
+            raise ValueError("historical SDLXLIFF segment has no source_ref")
+        location = (
+            source_ref.get("relative_path"),
+            source_ref.get("tu_id", source_ref.get("tu_index")),
+            source_ref.get(
+                "sdl_segment_id", source_ref.get("segment_index")
+            ),
+        )
+        if any(value is None for value in location):
+            raise ValueError("historical SDLXLIFF source_ref is incomplete")
+    return location, source, target
+
+
+def _assert_reread_coverage(
+    old_segments: object,
+    new_segments: object,
+    input_format: str,
+) -> None:
+    if not isinstance(old_segments, list) or not isinstance(new_segments, list):
+        raise ValueError("segment coverage must be represented by arrays")
+    old_signatures = [
+        _reread_segment_signature(segment, input_format)
+        for segment in old_segments
+    ]
+    new_signatures = [
+        _reread_segment_signature(segment, input_format)
+        for segment in new_segments
+    ]
+    if old_signatures != new_signatures:
+        raise ValueError(
+            "original input no longer has the historical segment coverage"
+        )
+
+
+def _reread_context_specs(raw: object) -> list[str]:
+    if raw in (None, {}):
+        return []
+    if not isinstance(raw, dict):
+        raise ValueError("historical context column mapping is not reconstructable")
+    specs = []
+    for field_ref, mapping in sorted(raw.items()):
+        if not isinstance(field_ref, str) or not isinstance(mapping, dict):
+            raise ValueError(
+                "historical context column mapping is not reconstructable"
+            )
+        column = mapping.get("column")
+        if not isinstance(column, (str, int)) or isinstance(column, bool):
+            raise ValueError(
+                f"historical context column {field_ref!r} is not reconstructable"
+            )
+        specs.append(f"{field_ref}={column}")
+    return specs
+
+
+def _reread_tabular_options(
+    old_job: Path,
+    state: dict,
+    input_path: Path,
+) -> dict:
+    expected_digest = state.get("input_sha256")
+    if (
+        not isinstance(expected_digest, str)
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_digest)
+    ):
+        raise ValueError(
+            "historical tabular state has no trustworthy input_sha256"
+        )
+    if file_sha256(input_path) != expected_digest.lower():
+        raise ValueError("original input digest does not match historical state")
+
+    no_header = state.get("no_header", False)
+    if type(no_header) is not bool:
+        raise ValueError("historical no_header option is invalid")
+    source_col = state.get("source_col")
+    target_col = state.get("target_col")
+    for label, value in (("source_col", source_col), ("target_col", target_col)):
+        if not isinstance(value, (str, int)) or isinstance(value, bool):
+            raise ValueError(f"historical {label} is not reconstructable")
+
+    sheet = state.get("sheet_name")
+    if input_path.suffix.casefold() in {".csv", ".tsv"}:
+        sheet = None
+    elif not isinstance(sheet, str) or not sheet.strip():
+        raise ValueError("historical sheet selection is not reconstructable")
+    headers, rows, _, _ = _read_tabular_source(
+        input_path,
+        sheet_name=sheet,
+        no_header=no_header,
+    )
+    source_index = _resolve_input_column(
+        headers, source_col, no_header=no_header, label="--source-col"
+    )
+    target_index = _resolve_input_column(
+        headers, target_col, no_header=no_header, label="--target-col"
+    )
+    old_segments = state.get("segments")
+    if not isinstance(old_segments, list):
+        raise ValueError("historical state has no segment array")
+    for segment in old_segments:
+        row_index, source, target = _reread_segment_signature(
+            segment, "tabular"
+        )
+        if row_index >= len(rows):
+            raise ValueError(
+                f"historical segment row {row_index} is missing from original input"
+            )
+        row = rows[row_index]
+        if _text(_cell(row, source_index)) != source or _text(
+            _cell(row, target_index)
+        ) != target:
+            raise ValueError(
+                f"historical segment row {row_index} no longer matches source/target"
+            )
+
+    manifest = None
+    manifest_value = state.get("tabular_source_manifest_path")
+    if manifest_value:
+        manifest_path = _reread_asset_path(
+            old_job, manifest_value, "tabular source manifest"
+        )
+        manifest = read_json(manifest_path)
+        if not isinstance(manifest, dict):
+            raise ValueError("historical tabular source manifest must be an object")
+        if manifest.get("input_sha256") != expected_digest:
+            raise ValueError(
+                "historical tabular source manifest digest conflicts with state"
+            )
+        for field, expected in (
+            ("source_col", source_col),
+            ("target_col", target_col),
+        ):
+            if field in manifest and manifest[field] != expected:
+                raise ValueError(
+                    f"historical tabular source manifest {field} conflicts with state"
+                )
+    manifest = manifest or {}
+    key_col = manifest.get("key_col")
+    if key_col is None and any(
+        segment.get("key_origin") == "input" for segment in old_segments
+    ):
+        raise ValueError("historical explicit business key column is unknown")
+    group_col = manifest.get("group_col")
+    if group_col is None and any(segment.get("group") for segment in old_segments):
+        raise ValueError("historical group column is not reconstructable")
+
+    context_columns = manifest.get(
+        "context_columns", state.get("context_cols")
+    )
+    target_digest_col = manifest.get("target_source_digest_col")
+    if state.get("input_guard_version") is not None and target_digest_col is None and any(
+        not any(
+            warning.get("code") == "UNVERIFIED_TARGET_PROVENANCE"
+            for warning in (segment.get("input_warnings") or [])
+            if isinstance(warning, dict)
+        )
+        for segment in old_segments
+    ):
+        raise ValueError(
+            "historical target source-digest column is not reconstructable"
+        )
+    pivot = manifest.get("pivot_guard") or state.get("pivot_guard") or {}
+    if pivot and not isinstance(pivot, dict):
+        raise ValueError("historical pivot options are not reconstructable")
+    if any(segment.get("input_status") == "blocked" for segment in old_segments):
+        if target_digest_col is None and not pivot:
+            raise ValueError("historical input guard options are not reconstructable")
+    return {
+        "sheet": sheet,
+        "source_col": source_col,
+        "target_col": target_col,
+        "key_col": key_col,
+        "context_cols": _reread_context_specs(context_columns),
+        "target_source_digest_col": target_digest_col,
+        "group_col": group_col,
+        "pivot_sheet": pivot.get("pivot_sheet"),
+        "pivot_key_col": (
+            (pivot.get("key") or {}).get("pivot", {}).get("column")
+            if pivot
+            else None
+        ),
+        "pivot_compare": [
+            f"{item.get('field')}={item.get('pivot', {}).get('column')}"
+            for item in pivot.get("comparisons", [])
+            if isinstance(item, dict)
+        ],
+        "pivot_authority": pivot.get("authority") if pivot else None,
+        "no_header": no_header,
+    }
+
+
+def _reread_sdlxliff_options(
+    old_job: Path,
+    state: dict,
+    input_path: Path,
+) -> dict:
+    manifest_path = _reread_asset_path(
+        old_job, state.get("source_manifest_path"), "SDLXLIFF source manifest"
+    )
+    manifest = read_json(manifest_path)
+    if not isinstance(manifest, dict):
+        raise ValueError("historical SDLXLIFF source manifest must be an object")
+    rules = manifest.get("rules") or {}
+    if not isinstance(rules, dict):
+        raise ValueError("historical SDLXLIFF rules are invalid")
+    raw_options = {
+        "tm_protection": manifest.get("tm_protection", "candidate-only"),
+        "content_type_rules": rules.get("content_type", []),
+        "exclude_rules": rules.get("exclusions", []),
+    }
+    options = validate_sdlxliff_options(raw_options)
+    result = read_sdlxliff(input_path, options=options)
+    expected_files = [
+        (item.get("relative_path"), item.get("sha256"))
+        for item in manifest.get("files", [])
+        if isinstance(item, dict)
+    ]
+    actual_files = [
+        (item.get("relative_path"), item.get("sha256"))
+        for item in result.manifest.get("files", [])
+    ]
+    if not expected_files or expected_files != actual_files:
+        raise ValueError("original SDLXLIFF input digest set does not match history")
+    _assert_reread_coverage(
+        state.get("segments"), result.segments, "sdlxliff"
+    )
+    has_rules = bool(raw_options["content_type_rules"] or raw_options["exclude_rules"])
+    if has_rules and not str(state.get("project", "")).strip():
+        raise ValueError(
+            "historical SDLXLIFF rules require a reconstructable project profile"
+        )
+    return {
+        "protect_exact_tm": (
+            raw_options["tm_protection"]
+            == "protect-exact-source-and-target"
+        )
+    }
+
+
+def _remap_reread_state_paths(value: object, old_root: Path, new_root: Path):
+    if isinstance(value, dict):
+        return {
+            key: _remap_reread_state_paths(item, old_root, new_root)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _remap_reread_state_paths(item, old_root, new_root)
+            for item in value
+        ]
+    if isinstance(value, str):
+        old_prefix = str(old_root.resolve())
+        if value == old_prefix or value.startswith(old_prefix + os.sep):
+            return str(new_root.resolve()) + value[len(old_prefix):]
+    return value
+
+
+def cmd_reread(args):
+    old_job_arg = Path(args.from_job)
+    old_state_path = (
+        old_job_arg if old_job_arg.is_file() else old_job_arg / "state.json"
+    )
+    old_job = old_state_path.parent.resolve()
+    input_path = Path(args.input).resolve()
+    new_job = Path(args.job).resolve()
+    if not old_state_path.is_file():
+        raise SystemExit(f"[reread] historical state is missing: {old_state_path}")
+    if (
+        new_job == old_job
+        or new_job.is_relative_to(old_job)
+        or _paths_alias(new_job, input_path)
+        or (input_path.is_dir() and new_job.is_relative_to(input_path))
+    ):
+        raise SystemExit("[reread] old job, input, and target job must be distinct")
+
+    original_state_bytes = old_state_path.read_bytes()
+    try:
+        state = json.loads(original_state_bytes)
+        if not isinstance(state, dict):
+            raise ValueError("historical state must be an object")
+        if job_runtime_contract_version(state) != 1:
+            raise ValueError("--from-job must be a historical runtime v1 job")
+        old_policy = get_review_policy(state)
+        review_mode = old_policy.get("mode")
+        if old_policy != build_review_policy(review_mode):
+            raise ValueError("historical review policy is not reconstructable")
+        old_scope = get_check_scope(state)
+        no_terminology = not old_scope.get("terminology_enabled", True)
+        if old_scope != build_check_scope(no_terminology):
+            raise ValueError("historical check scope is not reconstructable")
+        source_lang = state.get("source_lang")
+        target_lang = state.get("target_lang")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (source_lang, target_lang)
+        ):
+            raise ValueError("historical language pair is not reconstructable")
+        wordcount_basis = state.get("wordcount_basis")
+        if wordcount_basis not in {"target-words", "source-chars"}:
+            raise ValueError("historical wordcount basis is not reconstructable")
+        project = state.get("project") or None
+        if project is not None and not isinstance(project, str):
+            raise ValueError("historical project ID is invalid")
+        if args.profile_overlay and not project:
+            raise ValueError("--profile-overlay requires a historical project ID")
+        if not project and any(state.get(field) for field in ("sg_path", "terms_path")):
+            raise ValueError(
+                "historical ad-hoc style/terminology assets are not reconstructable"
+            )
+        input_format = state.get("input_format", "tabular")
+        if input_format not in {"tabular", "sdlxliff"}:
+            raise ValueError(f"unsupported historical input format: {input_format!r}")
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"[reread] {exc}") from exc
+
+    plan = {
+        "schema": "lqe.job-reread-migration-plan",
+        "version": 1,
+        "from_job": str(old_job),
+        "input": str(input_path),
+        "job": str(new_job),
+        "validation_status": "pending",
+        "inherited": {
+            "project": project,
+            "review_mode": review_mode,
+            "review_policy": old_policy,
+            "check_scope": old_scope,
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "wordcount_basis": wordcount_basis,
+            "input_format": input_format,
+            "source_col": state.get("source_col"),
+            "target_col": state.get("target_col"),
+            "sheet": state.get("sheet_name"),
+            "no_header": state.get("no_header", False),
+        },
+        "profile_overlay": (
+            str(Path(args.profile_overlay).resolve())
+            if args.profile_overlay
+            else None
+        ),
+        "context_overrides": (
+            str(Path(args.context_overrides).resolve())
+            if args.context_overrides
+            else None
+        ),
+    }
+    print(json.dumps(plan, ensure_ascii=False, sort_keys=True))
+
+    try:
+        if new_job.exists():
+            raise ValueError(f"target job already exists: {new_job}")
+        if not input_path.exists():
+            raise ValueError(f"original input is missing: {input_path}")
+        if detect_input_format(input_path, "auto") != input_format:
+            raise ValueError("explicit input format does not match historical state")
+        format_options = (
+            _reread_tabular_options(old_job, state, input_path)
+            if input_format == "tabular"
+            else _reread_sdlxliff_options(old_job, state, input_path)
+        )
+    except (OSError, ValueError, SDLXLIFFImportError, XLSImportError) as exc:
+        raise SystemExit(f"[reread] {exc}") from exc
+
+    new_job.parent.mkdir(parents=True, exist_ok=True)
+    staging_job = Path(
+        tempfile.mkdtemp(prefix=f".{new_job.name}.reread.", dir=new_job.parent)
+    )
+    read_lock = new_job.parent / f".{staging_job.name}.lqe-read.lock"
+    published = False
+    try:
+        read_args = argparse.Namespace(
+            input=str(input_path),
+            input_format=input_format,
+            protect_exact_tm=format_options.get("protect_exact_tm", False),
+            project=project,
+            profile_overlay=args.profile_overlay,
+            context_overrides=args.context_overrides,
+            sheet=format_options.get("sheet"),
+            source_col=format_options.get("source_col"),
+            target_col=format_options.get("target_col"),
+            key_col=format_options.get("key_col"),
+            context_cols=format_options.get("context_cols", []),
+            content_type_col=None,
+            speaker_col=None,
+            addressee_col=None,
+            relationship_stage_col=None,
+            scene_id_col=None,
+            scene_tone_col=None,
+            context_note_col=None,
+            pivot_sheet=format_options.get("pivot_sheet"),
+            pivot_key_col=format_options.get("pivot_key_col"),
+            pivot_compare=format_options.get("pivot_compare", []),
+            pivot_authority=format_options.get("pivot_authority"),
+            target_source_digest_col=format_options.get(
+                "target_source_digest_col"
+            ),
+            no_header=format_options.get("no_header", False),
+            group_col=format_options.get("group_col"),
+            terminology=None,
+            no_terminology=no_terminology,
+            style_guide=None,
+            target_lang=target_lang,
+            source_lang=source_lang,
+            wordcount_basis=wordcount_basis,
+            out=str(staging_job / "state.json"),
+            review_mode=review_mode,
+        )
+        cmd_read(read_args)
+        staged_state_path = staging_job / "state.json"
+        staged_state = read_json(staged_state_path)
+        require_current_job_runtime(staged_state, "reread")
+        _assert_reread_coverage(
+            state.get("segments"), staged_state.get("segments"), input_format
+        )
+        if get_review_policy(staged_state) != old_policy:
+            raise ValueError("new job review policy differs from migration plan")
+        if get_check_scope(staged_state) != old_scope:
+            raise ValueError("new job check scope differs from migration plan")
+        staged_state = _remap_reread_state_paths(
+            staged_state, staging_job, new_job
+        )
+        write_json_atomic(staged_state_path, staged_state)
+        if old_state_path.read_bytes() != original_state_bytes:
+            raise ValueError("historical state changed during reread")
+        if new_job.exists():
+            raise FileExistsError(f"target job appeared during reread: {new_job}")
+        os.rename(staging_job, new_job)
+        published = True
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"[reread] {exc}") from exc
+    finally:
+        if not published:
+            shutil.rmtree(staging_job, ignore_errors=True)
+        read_lock.unlink(missing_ok=True)
+    print(f"[reread] new runtime v2 job → {new_job}")
 
 # ── lookup-terms ──────────────────────────────────────────────────────────────
 
@@ -1364,7 +3593,11 @@ def _validated_tm_candidate_ids(
 
 
 def _state_protected_ids(state) -> set[int]:
-    return {s["id"] for s in state.get("segments", []) if s.get("protected")}
+    return {
+        s["id"]
+        for s in state.get("segments", [])
+        if s.get("protected") or s.get("input_status") == "blocked"
+    }
 
 
 def _stage_json_replacement(path: Path, value: object) -> Path:
@@ -1518,6 +3751,7 @@ def _correction_candidates(errors_data: list[dict]) -> dict[int, str]:
 
 
 def _cmd_protect_segments_locked(args, state_path: Path, state: dict):
+    require_current_job_runtime(state, "protect-segments")
     protected_file = getattr(args, "protected_file", None)
     protected_payload = read_json(protected_file) if protected_file else None
     try:
@@ -1600,6 +3834,7 @@ def cmd_protect_segments(args):
 
 
 def _cmd_build_results_locked(args, state_path: Path, state: dict):
+    require_current_job_runtime(state, "build-results")
     checks_path = Path(args.checks)
     out_path = Path(args.out)
     entries = normalize_check_entries(
@@ -1669,6 +3904,7 @@ def _cmd_apply_fixes_locked(
     manifest: dict | None,
     revalidate,
 ):
+    require_current_job_runtime(state, "apply-fixes")
     errors_data = read_json(args.errors)
     original_errors_data = deepcopy(errors_data)
     _validate_scope_or_exit(
@@ -1908,6 +4144,7 @@ def cmd_apply_fixes(args):
 
     state_path = Path(args.state)
     try:
+        require_current_job_runtime(read_json(state_path), "apply-fixes")
         with verification_generation_lease(
             state_path,
             exclusive=True,
@@ -2520,15 +4757,18 @@ def _build_xlsx(
         and total_counts.get("Critical", 0)
     )
     status = latest_status or (
-        "FAIL" if critical_gate_fail or score < threshold else "PASS"
+        "REVIEW_NOT_RUN"
+        if score is None
+        else ("FAIL" if critical_gate_fail or score < threshold else "PASS")
     )
+    score_display = "N/A" if score is None else f"{score:.2f}"
 
     intro = wb.create_sheet("说明·导读", 0)
     intro_wrap = Alignment(wrap_text=True, vertical="top")
     intro_rows = [
         ("LQE 质检报告 · 新人导读", "", "", ""),
         (
-            f"本次结果：{status} ｜ 得分：{score:.2f} ｜ "
+            f"本次结果：{status} ｜ 得分：{score_display} ｜ "
             f"合格线：{threshold}",
             "",
             "",
@@ -2831,6 +5071,21 @@ def _build_xlsx(
 
     source_lang = state.get("source_lang") or "-"
     target_lang = state.get("target_lang") or "-"
+    blocked_segment_count = sum(
+        segment.get("input_status") == "blocked" for segment in segments
+    )
+    reviewable_segment_count = len(segments) - blocked_segment_count
+    unverified_target_count = sum(
+        any(
+            (
+                warning.get("code")
+                if isinstance(warning, dict)
+                else warning
+            ) == "UNVERIFIED_TARGET_PROVENANCE"
+            for warning in segment.get("input_warnings", [])
+        )
+        for segment in segments
+    )
     info = [
         ("File", Path(state["input_path"]).name, "Wordcount", state.get("wordcount", 0)),
         ("Source language", source_lang, "Target language", target_lang),
@@ -2855,6 +5110,35 @@ def _build_xlsx(
         c.fill = _DARK_BLUE
         c.font = _WHITE_FONT
         c.alignment = _LEFT_TOP
+    scorecard_context_summary = [
+        (
+            5,
+            "Segment coverage",
+            f"Total: {len(segments)} | Reviewable: {reviewable_segment_count} | "
+            f"Blocked: {blocked_segment_count}",
+        ),
+        (
+            6,
+            "Input warning",
+            (
+                "UNVERIFIED_TARGET_PROVENANCE: "
+                f"{unverified_target_count} segment(s)"
+                if unverified_target_count
+                else "None"
+            ),
+        ),
+    ]
+    for row, label, value in scorecard_context_summary:
+        ws.row_dimensions[row].height = 30
+        for column, cell_value in ((9, label), (10, value)):
+            c = ws.cell(row=row, column=column)
+            _set_excel_text(c, cell_value)
+            c.fill = _DARK_BLUE
+            c.font = _WHITE_FONT
+            c.alignment = _LEFT_TOP
+    if unverified_target_count:
+        ws.cell(row=6, column=10).fill = _ORANGE
+        ws.cell(row=6, column=10).font = Font(bold=True)
 
     ws.row_dimensions[8].height = 6
 
@@ -2870,7 +5154,7 @@ def _build_xlsx(
     for row, label, val, val_fill, val_font in [
         (10, "Status",      status,          _RED if status == "FAIL" else _GREEN,
                                              Font(color="FFFFFF", bold=True)),
-        (11, "Final score", round(score, 4), _ORANGE, Font(bold=True)),
+        (11, "Final score", "N/A" if score is None else round(score, 4), _ORANGE, Font(bold=True)),
         (12, "Threshold",   threshold,       _ORANGE, Font(bold=True)),
     ]:
         c = ws.cell(row=row, column=1, value=label)
@@ -3109,6 +5393,16 @@ def _build_xlsx(
         "错误详情",
         "Protected",
         "Protection Evidence",
+        "Segment Key",
+        "Input Status",
+        "Content Type",
+        "Context Status",
+        "Context JSON",
+        "Context Provenance JSON",
+        "Context Digest",
+        "Resolved Constraints JSON",
+        "Capability Resolution Digest",
+        "Project Asset Snapshot Digest",
         "LQE_Iter",
     }
 
@@ -3146,6 +5440,16 @@ def _build_xlsx(
         "错误详情",
         "Protected",
         "Protection Evidence",
+        "Segment Key",
+        "Input Status",
+        "Content Type",
+        "Context Status",
+        "Context JSON",
+        "Context Provenance JSON",
+        "Context Digest",
+        "Resolved Constraints JSON",
+        "Capability Resolution Digest",
+        "Project Asset Snapshot Digest",
         "LQE_Iter",
     ]
     ws2_headers = visible_headers + technical_headers
@@ -3240,6 +5544,7 @@ def _build_xlsx(
                     _fmt_errors([issue]) if issue is not None else "",
                     "Yes" if is_protected else "No",
                     _protection_evidence(seg, all_protected_ids),
+                    *context_audit_values(state, seg),
                     seg.get("iter", 0),
                 ]
             )
@@ -3320,6 +5625,7 @@ def _cmd_write_locked(
     manifest: dict | None,
     revalidate,
 ):
+    require_current_job_runtime(state, "write")
     errors_path = Path(args.errors)
     final_errors_data = read_json(errors_path)
     original_errors_data = deepcopy(final_errors_data)
@@ -3497,6 +5803,7 @@ def cmd_write(args):
 
     state_path = Path(args.state)
     try:
+        require_current_job_runtime(read_json(state_path), "write")
         with verification_generation_lease(
             state_path,
             exclusive=True,
@@ -3522,6 +5829,7 @@ def cmd_pre_check(args):
     state_path = Path(args.state)
     try:
         with generation_lock(state_path.parent / "chunks", exclusive=True):
+            require_current_job_runtime(read_json(state_path), "pre-check")
             run_pre_check(
                 state_path,
                 Path(args.out) if args.out else None,
@@ -3833,6 +6141,7 @@ def _cmd_export_locked(
     manifest: dict | None,
     revalidate,
 ):
+    require_current_job_runtime(state, "export")
     errors_path = Path(args.errors) if getattr(args, "errors", None) else None
     overlay_entries = None
     original_overlay = None
@@ -3900,7 +6209,7 @@ def _cmd_export_locked(
     }
 
     def export_kind(segment):
-        if segment.get("protected"):
+        if segment.get("protected") or segment.get("input_status") == "blocked":
             return "已保护"
         label = _processing_label(result_entries[segment["id"]])
         if label == "已保护，不修改":
@@ -4051,7 +6360,11 @@ def _cmd_export_locked(
     try:
         _validate_export_paths(state_path, state, out_path, errors_path)
         source_digest = _validate_export_source_digest(state, src_path)
-        workbook = openpyxl.load_workbook(str(src_path))
+        workbook = (
+            workbook_for_corrected_export(src_path)
+            if src_path.suffix.casefold() == ".xls"
+            else openpyxl.load_workbook(str(src_path))
+        )
         sheet_name = state.get("sheet_name")
         worksheet = (
             workbook[sheet_name]
@@ -4131,6 +6444,7 @@ def cmd_export(args):
     state_path = Path(args.state)
     errors_path = Path(args.errors) if getattr(args, "errors", None) else None
     try:
+        require_current_job_runtime(read_json(state_path), "export")
         if errors_path is not None:
             with verification_generation_lease(
                 state_path,
@@ -4227,8 +6541,46 @@ def main():
         help="保护同时满足 origin=TM、100%% 和 SourceAndTarget 的 SDLXLIFF 段",
     )
     r.add_argument("--project", default=None, help="项目档案：projects/<名>/profile.json 或目录/文件路径；提供 SG/术语/词数基准/checks/confirmed_rules 默认值，显式参数优先")
+    r.add_argument("--profile-overlay", default=None, dest="profile_overlay",
+                   help="内部 profile overlay JSON；不能修改项目身份或语言")
+    r.add_argument(
+        "--context-overrides",
+        default=None,
+        dest="context_overrides",
+        help=(
+            "经人工或授权来源核实的 job 级上下文 sidecar；只允许正式 "
+            "foundation/enforce capability 字段，整批校验后原子发布"
+        ),
+    )
+    r.add_argument("--sheet", default=None,
+                   help="表格输入的主工作表；CSV/TSV 不适用")
     r.add_argument("--source-col", default=None, dest="source_col", help="列名或列索引（0-based，配合 --no-header）；表格输入必填")
     r.add_argument("--target-col", default=None, dest="target_col", help="列名或列索引（0-based，配合 --no-header）；表格输入必填")
+    r.add_argument("--key-col", default=None, dest="key_col",
+                   help="稳定业务 key 列；无值时按输入摘要、容器和行号生成")
+    r.add_argument("--context-col", action="append", default=[], dest="context_cols",
+                   help="通用上下文列 FIELD=COLUMN，可重复")
+    for flag, destination in (
+        ("--content-type-col", "content_type_col"),
+        ("--speaker-col", "speaker_col"),
+        ("--addressee-col", "addressee_col"),
+        ("--relationship-stage-col", "relationship_stage_col"),
+        ("--scene-id-col", "scene_id_col"),
+        ("--scene-tone-col", "scene_tone_col"),
+        ("--context-note-col", "context_note_col"),
+    ):
+        r.add_argument(flag, default=None, dest=destination)
+    r.add_argument("--pivot-sheet", default=None, dest="pivot_sheet")
+    r.add_argument("--pivot-key-col", default=None, dest="pivot_key_col")
+    r.add_argument("--pivot-compare", action="append", default=[], dest="pivot_compare")
+    r.add_argument(
+        "--pivot-authority",
+        choices=["authoritative", "diagnostic"],
+        default=None,
+        dest="pivot_authority",
+    )
+    r.add_argument("--target-source-digest-col", default=None,
+                   dest="target_source_digest_col")
     r.add_argument("--no-header", action="store_true", dest="no_header", help="文件无表头行，source-col/target-col 为整数索引")
     r.add_argument("--group-col", default=None, dest="group_col", help="成组文本（对联/题目）的组标识列名或索引；同组段落 Step 2 合并评估")
     terminology = r.add_mutually_exclusive_group()
@@ -4254,6 +6606,13 @@ def main():
             "Agent 应在初始化前向用户确认。"
         ),
     )
+
+    rr = sub.add_parser("reread")
+    rr.add_argument("--from-job", required=True, dest="from_job")
+    rr.add_argument("--input", required=True)
+    rr.add_argument("--job", required=True)
+    rr.add_argument("--profile-overlay", default=None, dest="profile_overlay")
+    rr.add_argument("--context-overrides", default=None, dest="context_overrides")
 
     af = sub.add_parser("apply-fixes")
     af.add_argument("--state",     required=True)
@@ -4300,6 +6659,7 @@ def main():
     args = p.parse_args()
     {
         "read":           cmd_read,
+        "reread":         cmd_reread,
         "pre-check":      cmd_pre_check,
         "protect-segments": cmd_protect_segments,
         "build-results":  cmd_build_results,

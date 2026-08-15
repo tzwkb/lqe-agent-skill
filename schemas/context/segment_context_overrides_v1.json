@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/segment_context_overrides_v1.json",
+  "title": "LQE segment context overrides v1",
+  "type": "object",
+  "required": ["schema", "version", "entries"],
+  "properties": {
+    "schema": {"const": "lqe.segment-context-overrides"},
+    "version": {"const": 1},
+    "entries": {"type": "array", "items": {"$ref": "#/$defs/entry"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entry": {
+      "type": "object",
+      "required": ["segment_key", "source_digest", "verification_status", "authority", "context_patch", "provenance"],
+      "properties": {
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "source_digest": {"$ref": "#/$defs/sha256"},
+        "verification_status": {"const": "verified"},
+        "authority": {
+          "type": "object",
+          "required": ["issuer"],
+          "properties": {"issuer": {"$ref": "#/$defs/nonempty"}},
+          "additionalProperties": true
+        },
+        "context_patch": {
+          "type": "object",
+          "required": ["extensions"],
+          "properties": {
+            "extensions": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "object",
+                "minProperties": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["record_id", "source_id"],
+          "properties": {
+            "record_id": {"$ref": "#/$defs/nonempty"},
+            "source_id": {"$ref": "#/$defs/nonempty"}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

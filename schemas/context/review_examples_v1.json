@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/review_examples_v1.json",
+  "title": "LQE reviewed examples v1",
+  "type": "object",
+  "required": ["schema", "version", "examples"],
+  "properties": {
+    "schema": {"const": "lqe.review-examples"},
+    "version": {"const": 1},
+    "examples": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/example"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "example": {
+      "type": "object",
+      "required": ["id", "dimensions", "source", "reason", "scope", "review_status", "authority", "uses"],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "content_types": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}, "uniqueItems": true},
+        "capabilities": {"type": "array", "items": {"$ref": "#/$defs/nonempty"}, "uniqueItems": true},
+        "dimensions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}, "uniqueItems": true},
+        "source": {"type": "string"},
+        "rejected_target": {"type": ["string", "null"]},
+        "preferred_target": {"type": ["string", "null"]},
+        "reason": {"$ref": "#/$defs/nonempty"},
+        "scope": {"enum": ["segment", "content_type", "capability", "project"]},
+        "review_status": {"enum": ["reviewed", "candidate", "superseded", "conflict"]},
+        "authority": {
+          "type": "object",
+          "required": ["issuer"],
+          "properties": {"issuer": {"$ref": "#/$defs/nonempty"}},
+          "additionalProperties": true
+        },
+        "uses": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"enum": ["regression_only", "runtime_reference"]},
+          "uniqueItems": true
+        },
+        "provenance": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

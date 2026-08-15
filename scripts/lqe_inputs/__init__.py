@@ -5,7 +5,7 @@ from typing import Literal
 InputFormat = Literal["tabular", "sdlxliff"]
 
 _SDLXLIFF_SUFFIX = ".sdlxliff"
-_TABULAR_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xlsm"}
+_TABULAR_SUFFIXES = {".csv", ".tsv", ".xls", ".xlsx", ".xlsm"}
 _SUPPORTED_SUFFIXES = {_SDLXLIFF_SUFFIX, *_TABULAR_SUFFIXES}
 
 
@@ -72,6 +72,12 @@ from .sdlxliff import (
     read_sdlxliff,
     serialize_mixed,
 )
+from .xls import (
+    XLSImportError,
+    XLSImportResult,
+    read_xls,
+    workbook_for_corrected_export,
+)
 
 
 __all__ = [
@@ -79,7 +85,11 @@ __all__ = [
     "SDLXLIFFImportResult",
     "SDLXLIFFOptions",
     "SerializedMixedContent",
+    "XLSImportError",
+    "XLSImportResult",
     "detect_input_format",
     "read_sdlxliff",
+    "read_xls",
+    "workbook_for_corrected_export",
     "serialize_mixed",
 ]

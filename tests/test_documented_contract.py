@@ -195,9 +195,16 @@ class DocumentedContractTests(unittest.TestCase):
             '"findings"',
             "batch_plan.json",
             "cost_report.json",
+            "selected_evidence_index.json",
+            '"worker_receipt"',
+            "job_relative",
+            "skill_relative",
+            "embedded_text",
+            "instructions.suggestions",
+            "canonical compact projection",
             "每个 worker 最多处理 4 个 packet",
             "25,000 原译字符",
-            "100,000 packet 字节",
+            "总输入不得超过 100,000 字节",
             "新批次必须新建 worker",
         ):
             with self.subTest(phrase=phrase):
@@ -253,14 +260,82 @@ class DocumentedContractTests(unittest.TestCase):
 
     def test_reference_suggestions_keep_agent_reliability_judgment(self):
         for phrase in (
-            '"version": 3',
+            '"version": 5',
             '"severities": ["Critical", "Major"]',
-            "严重度只决定候选范围",
-            "Agent 判断为可靠",
-            "优先读取非空 `content_type`",
+            "模型生成的整句建议必须通过独立 verifier",
+            "`entries.id ∪ abstained_ids`",
+            "优先读取 `content_type`",
+            "术语模块留下 `needs_confirmation: true`",
+            "`independent_verifier`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.suggestions)
+
+    def test_reference_suggestions_do_not_auto_abstain_for_missing_dialogue_fields(self):
+        for phrase in (
+            '"depends_on_dialogue_context": false',
+            "不是自动弃权条件",
+            "源文形式已经明确",
+            "候选不需要选择未知关系",
+            "会实质改变候选",
+            "`tone_decision.uncertainties` 必须固定为空数组",
+            "不自动授权目标语言中的敬语等级",
+            "带已验证 `scene_id`/`group_id`",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.suggestions)
+
+    def test_all_suggestion_tone_schemas_require_resolved_candidates(self):
+        schema_paths = (
+            "schemas/suggestions/generation_draft.schema.json",
+            "schemas/suggestions/candidates.schema.json",
+            "schemas/suggestions/review_packet.schema.json",
+            "schemas/suggestions/final.schema.json",
+        )
+
+        def tone_definitions(value):
+            found = []
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if (
+                        key == "tone_decision"
+                        and isinstance(child, dict)
+                        and isinstance(child.get("properties"), dict)
+                    ):
+                        found.append(child)
+                    found.extend(tone_definitions(child))
+            elif isinstance(value, list):
+                for child in value:
+                    found.extend(tone_definitions(child))
+            return found
+
+        for relative in schema_paths:
+            with self.subTest(schema=relative):
+                schema = json.loads((ROOT / relative).read_text(encoding="utf-8"))
+                definitions = tone_definitions(schema)
+                self.assertTrue(definitions)
+                for definition in definitions:
+                    self.assertEqual(
+                        definition["properties"]["uncertainties"]["maxItems"],
+                        0,
+                    )
+
+    def test_register_guidance_separates_pragmatics_from_social_register(self):
+        review = (ROOT / "references/suggestion_review.md").read_text(
+            encoding="utf-8"
+        )
+        naturalness = (ROOT / "references/check_modules/naturalness.md").read_text(
+            encoding="utf-8"
+        )
+        korean = (ROOT / "target_languages/ko/eval_notes.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("不自动证明目标语言必须使用某个敬语等级", review)
+        self.assertIn("不自动等于目标语言的敬语等级", naturalness)
+        self.assertIn("不自动等于韩语 `-요/-습니다`", korean)
+        for content in (review, naturalness, korean):
+            self.assertIn("scene", content)
+            self.assertIn("相似", content)
 
     def test_skill_publishes_review_mode_contract(self):
         self.assertEqual(
@@ -402,7 +477,7 @@ class DocumentedContractTests(unittest.TestCase):
             "AI/建议译文中新增或替换的内容显示为红色字体",
             "corrected 文件不添加差异样式",
             "openpyxl>=3.1",
-            'openpyxl>=3.1" regex',
+            '"jsonschema>=4.20" regex',
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.skill)

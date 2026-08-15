@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/context_gap_report_v1.json",
+  "title": "LQE context gap report v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "job_runtime_contract_version",
+    "segment_set_digest",
+    "descriptor_digest",
+    "summary",
+    "segments",
+    "report_digest"
+  ],
+  "properties": {
+    "schema": {"const": "lqe.context-gap-report"},
+    "version": {"const": 1},
+    "job_runtime_contract_version": {"const": 2},
+    "segment_set_digest": {"$ref": "#/$defs/sha256"},
+    "descriptor_digest": {"$ref": "#/$defs/sha256"},
+    "summary": {
+      "type": "object",
+      "required": [
+        "segments",
+        "fields",
+        "not_provided",
+        "unresolved_alias",
+        "ambiguous_alias",
+        "not_applicable",
+        "provided"
+      ],
+      "properties": {
+        "segments": {"type": "integer", "minimum": 0},
+        "fields": {"type": "integer", "minimum": 0},
+        "not_provided": {"type": "integer", "minimum": 0},
+        "unresolved_alias": {"type": "integer", "minimum": 0},
+        "ambiguous_alias": {"type": "integer", "minimum": 0},
+        "not_applicable": {"type": "integer", "minimum": 0},
+        "provided": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "segments": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/segment"}
+    },
+    "report_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "field": {
+      "type": "object",
+      "required": ["field_ref", "status", "value", "candidate_ids"],
+      "properties": {
+        "field_ref": {"$ref": "#/$defs/nonempty"},
+        "status": {
+          "enum": [
+            "not_provided",
+            "unresolved_alias",
+            "ambiguous_alias",
+            "not_applicable",
+            "provided"
+          ]
+        },
+        "value": {},
+        "candidate_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "segment": {
+      "type": "object",
+      "required": ["segment_key", "source_digest", "fields"],
+      "properties": {
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "source_digest": {"$ref": "#/$defs/sha256"},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+      },
+      "additionalProperties": false
+    }
+  }
+}

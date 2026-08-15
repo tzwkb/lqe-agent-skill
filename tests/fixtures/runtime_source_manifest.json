@@ -1,0 +1,5 @@
+{
+  "schema": "lqe.test-source-manifest",
+  "version": 1,
+  "adapter": "synthetic"
+}

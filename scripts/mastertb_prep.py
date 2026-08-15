@@ -19,6 +19,7 @@ Column mapping is by header name (auto-locates the real header row containing
 POSITIONALLY because the status header repeats for every language.
 """
 import argparse
+from copy import deepcopy
 import json
 import re
 import sys
@@ -189,25 +190,52 @@ def cmd_prep(a):
 CHECK_CONTEXT = """\
 # MasterTB 术语表自检上下文
 
-每个检查任务先读 `references/check_modules/common.md`、自己的模块文件和
-`references/check_modules/term_audit.md`，再读任务目录中的项目背景、语言说明、
-确认规则和风格指南。
+先运行：
 
-输入是 chunk JSON 的 `segments[]`。`source` 是中文术语，`target` 是待检查的
-泰语译文；`en`、`definition`、`category`、`gender`、`former`、
-`target_comment` 和 `scope` 提供消歧上下文。`precheck` 是机器预检结果。
+```bash
+python scripts/lqe_review.py prepare --job <JOB>
+```
+
+每个检查任务读取 `review_packets/<module>/chunk_NN.json`、
+`references/check_modules/common.md`、自己的模块文件和
+`references/check_modules/term_audit.md`，再读取 packet 绑定的 worker context。
+
+输入是 review packet 的 `segments[]`。`source` 是中文术语，`target` 是待检查的
+泰语译文；MasterTB 的 EN、定义、类别、性别、曾用名、目标备注、状态和范围
+按固定标签写入 `context_note`，用于消歧。`precheck` 是机器预检结果。
 
 四个必需模块分别写 `terminology`、`accuracy`、`grammar` 和 `naturalness`
 结果；`proper_names` 仅用于术语表自检中的 name 段，可选。
 
-每个模块先输出覆盖其分配 id 的 JSON 数组草稿：
+每个必需模块输出与 packet 绑定的紧凑草稿；`reviewed_ids` 原样复制，
+`findings` 只写有问题的 id：
 
 ```json
-[{"id": 123, "issues": [{"category": "Mistranslation", "severity": "Major",
-  "comment": "说明问题", "needs_confirmation": true, "edit": null}]}]
+{"schema": "lqe.compact-module-draft", "version": 1,
+ "module": "accuracy", "chunk_id": 0,
+ "packet_digest": "<packet>", "worker_batch_id": "<packet>",
+ "worker_packet_basis_digest": "<packet>",
+ "context_bundle_set_digest": "<packet>",
+ "worker_context_manifest_digest": "<packet>",
+ "selected_evidence_index_path": "<packet>",
+ "selected_evidence_index_digest": "<packet>",
+ "worker_receipt": {"worker_id": "<actual-checker-worker>",
+                    "run_id": "<unique-run>"},
+ "reviewed_ids": [123],
+ "findings": [{"id": 123, "issues": [{"category": "Mistranslation",
+   "severity": "Major", "comment": "说明问题",
+   "needs_confirmation": true, "edit": null}]}]}
 ```
 
-不得输出 `corrected` 或 `review_provenance`。安全局部修改和需要人工确认的规则以模块文档为准。草稿完成后必须按 `references/check_modules/common.md` 使用 `lqe_chunk.py publish-module` 和当前 chunk 指纹发布正式绑定文件，不能直接把裸数组写到正式模块路径。
+不得输出 `corrected` 或 `review_provenance`。`worker_receipt` 必须填写实际
+checker worker 身份和本次执行的唯一 run id。草稿完成后使用：
+
+```bash
+python scripts/lqe_review.py publish --job <JOB> --chunk <NN> \
+  --module <module> --input <draft.json>
+```
+
+不得直接写正式模块文件，也不得用 runtime v2 禁止的完整数组入口绕过 packet。
 """
 
 
@@ -226,6 +254,31 @@ def _kind(category, zhcn):
     if category == "Creature Individual":
         return "desc" if (any(m in zhcn for m in _DESC_MARK) or len(zhcn) > 6) else "name"
     return "desc"
+
+
+_CONTEXT_NOTE_FIELDS = (
+    ("EN", "en"),
+    ("Definition", "definition"),
+    ("Category", "category"),
+    ("Gender", "gender"),
+    ("Former", "former"),
+    ("Target comment", "th_comment"),
+    ("Status", "th_status"),
+    ("Scope", "scope"),
+)
+
+
+def _mastertb_context_note(segment, context):
+    lines = []
+    existing = cl(segment.get("context_note"))
+    if existing:
+        lines.append(f"Upstream context: {existing}")
+    lines.extend(
+        f"{label}: {value}"
+        for label, field in _CONTEXT_NOTE_FIELDS
+        if (value := cl(context.get(field)))
+    )
+    return "\n".join(lines) or None
 
 
 def cmd_chunks(a):
@@ -283,17 +336,42 @@ def cmd_chunks(a):
         for s in block:
             c = ctx[str(s["id"])]
             segments.append({
-                "id": s["id"], "source": c["zhcn"], "target": c["th"],
+                "id": s["id"],
+                "segment_key": s.get("segment_key"),
+                "key_origin": s.get("key_origin"),
+                "source": c["zhcn"],
+                "target": c["th"],
+                "source_digest": s.get("source_digest"),
+                "source_provenance": deepcopy(s.get("source_provenance")),
+                "input_status": s.get("input_status", "ready"),
+                "input_block_reasons": deepcopy(
+                    s.get("input_block_reasons", [])
+                ),
+                "input_warnings": deepcopy(s.get("input_warnings", [])),
+                "content_type": s.get("content_type"),
+                "text_type_context": s.get("text_type_context"),
+                "context_note": _mastertb_context_note(s, c),
+                "context": deepcopy(s.get("context")),
+                "context_provenance": deepcopy(
+                    s.get("context_provenance", {})
+                ),
+                "context_status": s.get("context_status"),
+                "context_missing_required": deepcopy(
+                    s.get("context_missing_required", [])
+                ),
+                "resolved_constraints": deepcopy(
+                    s.get("resolved_constraints", [])
+                ),
+                "segment_revision_digest": s.get("segment_revision_digest"),
+                "module_review_equivalence_keys": deepcopy(
+                    s.get("module_review_equivalence_keys", {})
+                ),
                 "kind": _kind(c["category"], c["zhcn"]),
                 "precheck": precheck.get(s["id"], []),
                 "term_hits": [], "term_near": [],
                 "protected": bool(s.get("protected")),
+                "protected_reason": s.get("protected_reason"),
                 "protected_texts": s.get("protected_texts", []),
-                "en": c["en"],
-                "definition": c["definition"], "category": c["category"],
-                "gender": c["gender"], "former": c["former"],
-                "target_comment": c["th_comment"],
-                "target_status": c["th_status"], "scope": c["scope"],
             })
         chunk_payloads.append(
             add_chunk_payload_digest(
@@ -303,6 +381,9 @@ def cmd_chunks(a):
                     "state_fingerprint": revision["state_fingerprint"],
                     "split_fingerprint": revision["split_fingerprint"],
                     "review_policy": get_review_policy(state),
+                    "resolved_context_descriptors": deepcopy(
+                        state.get("resolved_context_descriptors", {})
+                    ),
                     "segments": segments,
                 }
             )
@@ -345,6 +426,11 @@ def cmd_chunks(a):
     for module in _REQUIRED_MODULES:
         print(f"       chunk_NN.{module}.json")
     print(f"     可选专名检查：chunk_NN.{_OPTIONAL_MODULES[0]}.json")
+    print(f"     python scripts/lqe_review.py prepare --job {job}")
+    print(
+        "     python scripts/lqe_review.py publish --job "
+        f"{job} --chunk <NN> --module <module> --input <draft.json>"
+    )
     print(f"     python scripts/lqe_chunk.py validate-checks --job {job}")
     print(f"     python scripts/lqe_chunk.py merge-checks --job {job}")
     print(f"     python scripts/mastertb_prep.py merge --job-dir {job}")

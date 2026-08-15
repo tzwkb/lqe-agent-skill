@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/lqe/capability-resolution-v1.json",
+  "title": "LQE capability resolution v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "profile_contract_version",
+    "job_runtime_contract_version",
+    "context_pipeline_mode",
+    "source_profile_digest",
+    "enabled",
+    "disabled",
+    "warnings",
+    "digest"
+  ],
+  "properties": {
+    "schema": {"const": "lqe.capability-resolution"},
+    "version": {"const": 1},
+    "profile_contract_version": {"enum": [1, 2]},
+    "job_runtime_contract_version": {"type": "integer", "minimum": 1},
+    "context_pipeline_mode": {"enum": ["off", "shadow", "enforce"]},
+    "source_profile_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "enabled": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "required",
+          "effect",
+          "descriptor_digest",
+          "config_digest"
+        ]
+      }
+    },
+    "disabled": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["reason"]
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,381 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/worker_context_manifest_v1.json",
+  "title": "LQE worker context manifest v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "module",
+    "profile",
+    "capability_resolution",
+    "project_asset_snapshot",
+    "project_assets",
+    "language_providers",
+    "source_manifests",
+    "language_notes",
+    "worker_documents",
+    "instructions",
+    "shared_context_assets",
+    "context_bundles",
+    "packet_payloads",
+    "budget",
+    "worker_context_manifest_digest"
+  ],
+  "properties": {
+    "schema": {"const": "lqe.worker-context-manifest"},
+    "version": {"const": 1},
+    "module": {"$ref": "#/$defs/nonempty"},
+    "profile": {
+      "type": "object",
+      "required": ["digest", "overlay_digest"],
+      "properties": {
+        "digest": {"$ref": "#/$defs/sha256"},
+        "overlay_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "capability_resolution": {"$ref": "#/$defs/digest_binding"},
+    "project_asset_snapshot": {"$ref": "#/$defs/digest_binding"},
+    "project_assets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/project_asset"}
+    },
+    "language_providers": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/provider"}
+    },
+    "source_manifests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source_manifest_summary"}
+    },
+    "language_notes": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/document_summary"}
+      ]
+    },
+    "worker_documents": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/document_summary"}
+    },
+    "instructions": {
+      "type": "object",
+      "required": ["common", "module", "suggestions"],
+      "properties": {
+        "common": {"$ref": "#/$defs/document_summary"},
+        "module": {"$ref": "#/$defs/document_summary"},
+        "suggestions": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/document_summary"}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "shared_context_assets": {"$ref": "#/$defs/shared_summary"},
+    "context_bundles": {"$ref": "#/$defs/set_summary"},
+    "packet_payloads": {"$ref": "#/$defs/set_summary"},
+    "budget": {
+      "type": "object",
+      "required": ["max_bytes", "measured_bytes", "components", "status"],
+      "properties": {
+        "max_bytes": {"type": "integer", "minimum": 1},
+        "measured_bytes": {"type": "integer", "minimum": 0},
+        "components": {
+          "type": "object",
+          "required": [
+            "readable_resources",
+            "source_manifest_projections",
+            "shared_context_assets",
+            "context_bundles",
+            "packet_payloads"
+          ],
+          "properties": {
+            "readable_resources": {"type": "integer", "minimum": 0},
+            "source_manifest_projections": {"type": "integer", "minimum": 0},
+            "shared_context_assets": {"type": "integer", "minimum": 0},
+            "context_bundles": {"type": "integer", "minimum": 0},
+            "packet_payloads": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "status": {"const": "within_budget"}
+      },
+      "additionalProperties": false
+    },
+    "worker_context_manifest_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "digest_binding": {
+      "type": "object",
+      "required": ["digest"],
+      "properties": {"digest": {"$ref": "#/$defs/sha256"}},
+      "additionalProperties": false
+    },
+    "document_summary": {
+      "type": "object",
+      "required": ["id", "sha256", "bytes", "locator"],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "schema": {"type": ["string", "null"]},
+        "version": {"type": ["integer", "string", "null"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "locator": {"$ref": "#/$defs/resource_locator"}
+      },
+      "additionalProperties": false
+    },
+    "resource_locator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": {"const": "job_relative"},
+            "path": {"$ref": "#/$defs/nonempty"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": {"const": "skill_relative"},
+            "path": {"$ref": "#/$defs/nonempty"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "content"],
+          "properties": {
+            "kind": {"const": "embedded_text"},
+            "content": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "source_manifest_summary": {
+      "type": "object",
+      "required": [
+        "id",
+        "schema",
+        "version",
+        "sha256",
+        "bytes",
+        "projection",
+        "projection_digest",
+        "projection_bytes"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "schema": {"type": ["string", "null"]},
+        "version": {"type": ["integer", "string", "null"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "projection": {
+          "oneOf": [
+            {"$ref": "#/$defs/project_source_projection"},
+            {"$ref": "#/$defs/bound_source_projection"}
+          ]
+        },
+        "projection_digest": {"$ref": "#/$defs/sha256"},
+        "projection_bytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "bound_source_projection": {
+      "type": "object",
+      "required": ["kind", "schema", "version"],
+      "properties": {
+        "kind": {"const": "bound_source_manifest"},
+        "schema": {"type": ["string", "null"]},
+        "version": {"type": ["integer", "string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "project_source_projection": {
+      "type": "object",
+      "required": [
+        "kind",
+        "project",
+        "manifest_scope",
+        "manifest_digest",
+        "coverage",
+        "sources",
+        "generated_assets"
+      ],
+      "properties": {
+        "kind": {"const": "project_source_manifest"},
+        "project": {"$ref": "#/$defs/nonempty"},
+        "manifest_scope": {"enum": ["internal", "public", "redacted"]},
+        "manifest_digest": {"$ref": "#/$defs/sha256"},
+        "coverage": {
+          "type": "object",
+          "required": ["total_nonempty", "converted", "normalized", "ignored", "unmapped"],
+          "properties": {
+            "total_nonempty": {"type": "integer", "minimum": 0},
+            "converted": {"type": "integer", "minimum": 0},
+            "normalized": {"type": "integer", "minimum": 0},
+            "ignored": {"type": "integer", "minimum": 0},
+            "unmapped": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "authority", "availability"],
+            "properties": {
+              "id": {"$ref": "#/$defs/nonempty"},
+              "kind": {"$ref": "#/$defs/nonempty"},
+              "authority": {
+                "type": "object",
+                "required": ["issuer"],
+                "properties": {"issuer": {"$ref": "#/$defs/nonempty"}},
+                "additionalProperties": false
+              },
+              "availability": {"enum": ["included", "external"]}
+            },
+            "additionalProperties": false
+          }
+        },
+        "generated_assets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "distribution", "generator"],
+            "properties": {
+              "id": {"$ref": "#/$defs/nonempty"},
+              "kind": {"$ref": "#/$defs/nonempty"},
+              "distribution": {"enum": ["public_allowed", "internal_only", "redacted"]},
+              "generator": {
+                "oneOf": [
+                  {"type": "null"},
+                  {
+                    "type": "object",
+                    "required": ["name", "version"],
+                    "properties": {
+                      "name": {"$ref": "#/$defs/nonempty"},
+                      "version": {"type": ["integer", "string"]}
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "project_asset": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "kind",
+        "status",
+        "sha256",
+        "distribution",
+        "availability",
+        "required",
+        "authority",
+        "provenance",
+        "media_type",
+        "content_schema",
+        "capability_ids",
+        "document_digest"
+      ],
+      "properties": {
+        "asset_id": {"$ref": "#/$defs/nonempty"},
+        "kind": {"$ref": "#/$defs/nonempty"},
+        "status": {"const": "present"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "distribution": {"enum": ["public_allowed", "internal_only", "redacted"]},
+        "availability": {"const": "included"},
+        "required": {"type": "boolean"},
+        "authority": {
+          "type": "object",
+          "required": ["issuer"],
+          "properties": {"issuer": {"$ref": "#/$defs/nonempty"}},
+          "additionalProperties": true
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {"kind": {"$ref": "#/$defs/nonempty"}},
+          "additionalProperties": true
+        },
+        "media_type": {"type": ["string", "null"], "minLength": 1},
+        "content_schema": {"type": ["string", "null"], "minLength": 1},
+        "capability_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "document_digest": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "provider": {
+      "type": "object",
+      "required": [
+        "capability_id",
+        "id",
+        "api_version",
+        "target_lang",
+        "descriptor_digest"
+      ],
+      "properties": {
+        "capability_id": {"$ref": "#/$defs/nonempty"},
+        "id": {"$ref": "#/$defs/nonempty"},
+        "api_version": {"type": "integer", "minimum": 1},
+        "target_lang": {"$ref": "#/$defs/nonempty"},
+        "descriptor_digest": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "shared_summary": {
+      "type": "object",
+      "required": ["digest", "counts", "bytes"],
+      "properties": {
+        "digest": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "counts": {
+          "type": "object",
+          "required": ["entities", "relations", "review_examples", "constraints"],
+          "properties": {
+            "entities": {"type": "integer", "minimum": 0},
+            "relations": {"type": "integer", "minimum": 0},
+            "review_examples": {"type": "integer", "minimum": 0},
+            "constraints": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "set_summary": {
+      "type": "object",
+      "required": ["digest", "count", "bytes"],
+      "properties": {
+        "digest": {"$ref": "#/$defs/sha256"},
+        "count": {"type": "integer", "minimum": 0},
+        "bytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  }
+}

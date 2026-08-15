@@ -25,6 +25,13 @@ from lqe_result_contract import build_result_contract
 
 
 def write_json(path: Path, value) -> None:
+    if (
+        path.name == "state.json"
+        and isinstance(value, dict)
+        and isinstance(value.get("segments"), list)
+        and "job_runtime_contract_version" not in value
+    ):
+        value["job_runtime_contract_version"] = 2
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 

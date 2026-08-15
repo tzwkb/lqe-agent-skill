@@ -95,6 +95,7 @@ def _state_segment_payload(segment: dict) -> dict:
             "precheck",
             "term_hits",
             "term_near",
+            "shadow_context",
         }
     }
     payload["target"] = current_target(segment)
@@ -165,12 +166,40 @@ def state_revision_payload(state: dict) -> dict:
         raise SplitContractError("state.segments must be an array")
     return {
         "artifact_contract_version": state.get("artifact_contract_version"),
+        "job_runtime_contract_version": state.get("job_runtime_contract_version"),
+        "context_contract_version": state.get("context_contract_version"),
+        "input_guard_version": state.get("input_guard_version"),
         "iteration": state.get("iteration", 0),
         "source_lang": state.get("source_lang"),
         "target_lang": state.get("target_lang"),
         "wordcount": state.get("wordcount"),
+        "review_wordcount": state.get("review_wordcount"),
+        "review_wordcount_basis_digest": state.get(
+            "review_wordcount_basis_digest"
+        ),
         "check_scope": deepcopy(state.get("check_scope")),
         "review_policy": get_review_policy(state),
+        "profile_digest": state.get("profile_digest"),
+        "capability_resolution_digest": state.get(
+            "capability_resolution_digest"
+        ),
+        "project_asset_snapshot_digest": state.get(
+            "project_asset_snapshot_digest"
+        ),
+        "context_overrides_digest": state.get("context_overrides_digest"),
+        "context_overrides_fingerprint": state.get(
+            "context_overrides_fingerprint"
+        ),
+        "context_runtime_fingerprint": state.get(
+            "context_runtime_fingerprint"
+        ),
+        "context_gap_report_digest": state.get(
+            "context_gap_report_digest"
+        ),
+        "context_pipeline": deepcopy(state.get("context_pipeline")),
+        "module_context_views": deepcopy(
+            state.get("module_context_views", {})
+        ),
         "asset_paths": {
             key: _asset_snapshot(state.get(key), key)
             for key in (
@@ -180,6 +209,13 @@ def state_revision_payload(state: dict) -> dict:
                 "confirmed_rules_path",
                 "lang_notes_path",
                 "background_path",
+                "capability_resolution_path",
+                "project_asset_snapshot_path",
+                "tabular_source_manifest_path",
+                "source_manifest_path",
+                "project_source_manifest_path",
+                "context_overrides_path",
+                "context_gap_report_path",
             )
             if state.get(key) is not None
         },

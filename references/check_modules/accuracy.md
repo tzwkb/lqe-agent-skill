@@ -15,6 +15,8 @@
 
 ## 修改规则
 
+- 先从 source 独立列出主体、动作、对象、否定、条件、情态和文本功能，再核对 target；不得把 target 当成 source 的替代文本或语义骨架。
+- 遇到整句错位或 Major Accuracy 问题时，问题说明必须覆盖完整 source 命题；局部 edit 不足以恢复全部含义时必须标记需要完整重译。
 - 只有能唯一定位、不会改变其他含义的局部替换才给 `"needs_confirmation": false` 和 `"edit"`。
 - 需要重写句子、源文含义不清、多个改法均合理或涉及未确认名称时，写 `"needs_confirmation": true`、`"edit": null`。
 

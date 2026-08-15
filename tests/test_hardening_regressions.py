@@ -17,11 +17,19 @@ FINALIZE_SCRIPT = ROOT / "scripts" / "finalize_job.sh"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import lqe_paths
+from lqe_engine import issue_contract_problem
 from lqe_scoring import resolve_scoring_policy, score_errors
 from lqe_terms import TermContractError, canonicalize_terms
 
 
 def write_json(path: Path, value: object) -> None:
+    if (
+        path.name == "state.json"
+        and isinstance(value, dict)
+        and isinstance(value.get("segments"), list)
+        and "job_runtime_contract_version" not in value
+    ):
+        value["job_runtime_contract_version"] = 2
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2),
@@ -395,6 +403,52 @@ class ScoringBoundaryRegressionTests(unittest.TestCase):
                 term_status_map={"Approved": "confirmed"},
                 protected_statuses="Approved",
             )
+
+    def test_issue_resolution_status_combinations_fail_closed(self):
+        base = issue()
+        base["resolution_status"] = "reference_allowed"
+        self.assertIsNone(issue_contract_problem(base))
+
+        invalid = dict(base, needs_confirmation=False)
+        self.assertIn("must need confirmation", issue_contract_problem(invalid))
+
+        invalid = dict(base, edit={"from": "A", "to": "B"})
+        self.assertIn("edit to null", issue_contract_problem(invalid))
+
+        invalid = dict(base, resolution_status="input_blocked")
+        self.assertIn("unsupported", issue_contract_problem(invalid))
+
+    def test_issue_reason_codes_are_unique_nonempty_strings(self):
+        base = issue()
+        base["reason_codes"] = ["SOURCE_TARGET_MISMATCH"]
+        self.assertIsNone(issue_contract_problem(base))
+        for invalid_codes in ([], [""], ["A", "A"], "A"):
+            invalid = dict(base, reason_codes=invalid_codes)
+            self.assertIn("reason_codes", issue_contract_problem(invalid))
+
+    def test_non_authorizing_term_evidence_is_preserved_by_issue_normalizer(self):
+        from lqe_corrections import normalize_check_entries
+
+        value = issue()
+        value["resolution_status"] = "reference_allowed"
+        value["non_authorizing_evidence"] = [{
+            "source_term": "红果",
+            "cannot_authorize_source": "蓝果",
+            "target": "red fruit",
+            "reason": "different source term cannot grant glossary authority",
+        }]
+        normalized = normalize_check_entries(
+            [{"id": 0, "issues": [value]}],
+            label="draft",
+        )
+        self.assertEqual(
+            normalized[0]["issues"][0]["non_authorizing_evidence"],
+            value["non_authorizing_evidence"],
+        )
+
+        invalid = dict(value)
+        invalid["non_authorizing_evidence"] = [{"source_term": "红果"}]
+        self.assertIn("non_authorizing", issue_contract_problem(invalid))
 
 
 class ErrorLevelProtectionRegressionTests(unittest.TestCase):

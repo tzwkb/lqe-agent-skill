@@ -35,9 +35,17 @@ from lqe_engine import (
     terminology_enabled,
     validate_scope_entries,
 )
+from tests.runtime_helpers import publish_compact_modules
 
 
 def write_json(path: Path, value) -> None:
+    if (
+        path.name == "state.json"
+        and isinstance(value, dict)
+        and isinstance(value.get("segments"), list)
+        and "job_runtime_contract_version" not in value
+    ):
+        value = {**value, "job_runtime_contract_version": 2}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -1541,26 +1549,13 @@ class NoTerminologyFinalizeTests(unittest.TestCase):
 
         write_json(self.job / "errors_precheck.json", [{"id": 0, "issues": []}])
         self.split_job()
-        base = read_json(self.job / "chunks" / "chunk_00.json")
-        for module in NO_TERMINOLOGY_REQUIRED_MODULES:
-            draft = self.job / f"{module}.draft.json"
-            write_json(draft, [{"id": 0, "issues": []}])
-            published = self.run_chunk(
-                "publish-module",
-                "--job",
-                self.job,
-                "--chunk",
-                0,
-                "--module",
-                module,
-                "--input",
-                draft,
-                "--split-fingerprint",
-                base["split_fingerprint"],
-                "--chunk-payload-digest",
-                base["payload_digest"],
-            )
-            self.assertEqual(published.returncode, 0, published.stderr)
+        publish_compact_modules(
+            self.job,
+            {
+                module: [{"id": 0, "issues": []}]
+                for module in NO_TERMINOLOGY_REQUIRED_MODULES
+            },
+        )
 
     def write_raw_checks(self, *, category="Terminology", comment="forbidden"):
         issue = {

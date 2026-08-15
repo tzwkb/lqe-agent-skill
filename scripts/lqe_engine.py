@@ -295,6 +295,58 @@ def issue_contract_problem(
     for field in ("needs_confirmation", "protected", "repeated"):
         if field in issue and type(issue[field]) is not bool:
             return f"{field} must be boolean"
+    resolution_status = issue.get("resolution_status")
+    if resolution_status is not None:
+        allowed = {
+            "resolved",
+            "reference_allowed",
+            "human_choice_required",
+            "conflict",
+        }
+        if resolution_status not in allowed:
+            return f"unsupported resolution_status {resolution_status!r}"
+        needs_confirmation = issue.get("needs_confirmation") is True
+        edit = issue.get("edit")
+        if resolution_status == "resolved" and needs_confirmation:
+            return "resolved issue must not need confirmation"
+        if resolution_status in {
+            "reference_allowed",
+            "human_choice_required",
+            "conflict",
+        }:
+            if not needs_confirmation:
+                return f"{resolution_status} issue must need confirmation"
+            if edit is not None:
+                return f"{resolution_status} issue must set edit to null"
+    reason_codes = issue.get("reason_codes")
+    if reason_codes is not None and (
+        not isinstance(reason_codes, list)
+        or not reason_codes
+        or any(
+            not isinstance(code, str) or not code.strip()
+            for code in reason_codes
+        )
+        or len(reason_codes) != len(set(reason_codes))
+    ):
+        return "reason_codes must be a unique array of non-empty strings"
+    non_authorizing = issue.get("non_authorizing_evidence")
+    if non_authorizing is not None:
+        required_fields = {
+            "source_term",
+            "cannot_authorize_source",
+            "target",
+            "reason",
+        }
+        if not isinstance(non_authorizing, list) or not non_authorizing:
+            return "non_authorizing_evidence must be a non-empty array"
+        for item in non_authorizing:
+            if not isinstance(item, dict) or set(item) != required_fields:
+                return "non_authorizing_evidence fields are invalid"
+            if any(
+                not isinstance(item[field], str) or not item[field].strip()
+                for field in required_fields
+            ):
+                return "non_authorizing_evidence values must be non-empty strings"
     return None
 
 
@@ -342,6 +394,7 @@ def read_json(path):
 
 
 ARTIFACT_CONTRACT_VERSION = 1
+JOB_RUNTIME_CONTRACT_VERSION = 2
 
 
 def requires_bound_artifacts(state: dict) -> bool:
@@ -354,6 +407,25 @@ def requires_bound_artifacts(state: dict) -> bool:
             f"{version!r}"
         )
     return True
+
+
+def job_runtime_contract_version(state: dict) -> int:
+    value = state.get("job_runtime_contract_version")
+    if value is None:
+        return 1
+    if value != JOB_RUNTIME_CONTRACT_VERSION:
+        raise ValueError(
+            "unsupported state job_runtime_contract_version: " f"{value!r}"
+        )
+    return value
+
+
+def require_current_job_runtime(state: dict, command: str) -> None:
+    if job_runtime_contract_version(state) != JOB_RUNTIME_CONTRACT_VERSION:
+        raise ValueError(
+            f"{command}: historical runtime v1 job is read-only; "
+            "re-read the original input into a new job"
+        )
 
 
 def load_terms(state: dict) -> list[dict]:

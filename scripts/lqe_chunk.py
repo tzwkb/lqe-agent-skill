@@ -31,6 +31,7 @@ from lqe_engine import (
     load_terms,
     optional_modules,
     read_json as load,
+    require_current_job_runtime,
     requires_bound_artifacts,
     required_modules,
     scope_issue_problem,
@@ -61,6 +62,83 @@ from lqe_split_contract import (
 )
 from lqe_terms import load_canonical_terminology
 from term_suggest import build_index as _tn_build, suggest as _tn_suggest
+
+try:
+    from lqe_context import (
+        descriptor_registry,
+        module_review_equivalence_key,
+        project_segment_for_module,
+    )
+except ImportError:  # context module is optional during legacy bootstrap
+    descriptor_registry = None
+    module_review_equivalence_key = None
+    project_segment_for_module = None
+
+try:
+    from lqe_capabilities import canonical_digest as _capability_digest
+    from lqe_capabilities import validate_capability_descriptor
+except ImportError:  # legacy bootstrap
+    _capability_digest = None
+    validate_capability_descriptor = None
+
+
+LEGACY_DEFAULT_SPLIT_SIZE = 100
+ENFORCE_DEFAULT_SPLIT_SIZE = 5
+
+
+def resolve_split_size(state: dict, requested_size: int | None) -> int:
+    if requested_size is not None:
+        return requested_size
+    pipeline = state.get("context_pipeline")
+    mode = pipeline.get("mode") if isinstance(pipeline, dict) else "off"
+    if mode == "enforce":
+        return ENFORCE_DEFAULT_SPLIT_SIZE
+    return LEGACY_DEFAULT_SPLIT_SIZE
+
+
+def _state_context_registry(state: dict):
+    if descriptor_registry is None:
+        return None
+    descriptors = state.get("resolved_context_descriptors")
+    if not isinstance(descriptors, dict):
+        return None
+    if validate_capability_descriptor is not None:
+        resolution = state.get("capability_resolution", {})
+        enabled = resolution.get("enabled", {}) if isinstance(resolution, dict) else {}
+        expected_context_ids = {
+            capability_id
+            for capability_id, item in enabled.items()
+            if capability_id.startswith("context.")
+            and item.get("effect") in {"foundation", "enforce"}
+        }
+        if expected_context_ids and set(descriptors) != expected_context_ids:
+            raise SplitContractError(
+                "resolved context descriptor coverage differs from capability resolution"
+            )
+        for capability_id, descriptor in descriptors.items():
+            if descriptor.get("id") != capability_id:
+                raise SplitContractError(
+                    f"resolved context descriptor id mismatch: {capability_id}"
+                )
+            normalized = validate_capability_descriptor(
+                descriptor,
+                custom=capability_id not in {
+                    "context.core@1",
+                    "context.dialogue@1",
+                    "context.ui@1",
+                    "context.marketing@1",
+                },
+            )
+            if normalized != descriptor:
+                raise SplitContractError(
+                    f"resolved context descriptor is not canonical: {capability_id}"
+                )
+            expected = enabled.get(capability_id, {}).get("descriptor_digest")
+            if expected is not None and _capability_digest(descriptor) != expected:
+                raise SplitContractError(
+                    f"resolved context descriptor digest mismatch: {capability_id}"
+                )
+    return descriptors
 
 
 def _group_chunk_terms(terms):
@@ -378,6 +456,12 @@ def _enrich_verification_segments(
     by_id = {segment["id"]: segment for segment in segments}
     contexts = {}
     for chunk in chunks:
+        chunk_registry = chunk.get("resolved_context_descriptors")
+        state_registry = state.get("resolved_context_descriptors")
+        if isinstance(state_registry, dict) and chunk_registry != state_registry:
+            raise SplitContractError(
+                "chunk resolved context descriptors differ from state"
+            )
         for context in chunk["segments"]:
             contexts[context["id"]] = context
     for raw_representative, members in dedup_map.items():
@@ -402,7 +486,7 @@ def _enrich_verification_segments(
             raise SplitContractError(
                 f"chunk context: segment {segment_id} differs from state"
             )
-        for key in ("kind", "term_hits", "protected_texts"):
+        for key in ("kind", "term_hits", "term_near", "protected_texts"):
             if key in context:
                 segment[key] = copy.deepcopy(context[key])
     return segments
@@ -515,6 +599,7 @@ def load_verification_segments(
 
 def cmd_split(a):
     state = load(a.state)
+    require_current_job_runtime(state, "split")
     review_policy = get_review_policy(state)
     pre = normalize_check_entries(
         load(a.errors),
@@ -537,7 +622,8 @@ def cmd_split(a):
     else:
         terms = load_terms(state)
     segs = state["segments"]
-    size = a.size
+    context_registry = _state_context_registry(state)
+    size = resolve_split_size(state, a.size)
     budget = getattr(a, "char_budget", 0) or 0
     scope = get_check_scope(state)
     revision = build_split_revision(
@@ -596,14 +682,25 @@ def cmd_split(a):
     tn_pairs = [(src, senses[0]["target"]) for src, senses in grouped.items() if senses]
     tn_idx = _tn_build([p[0] for p in tn_pairs], [p[1] for p in tn_pairs]) if tn_pairs else None
 
-    # 相同源文和译文只检查一次；合并时把结果复制到组内每个 id
+    # Only segments with the same effective review projection may share results.
     groups = {}
     for seg in segs:
-        groups.setdefault(
-            (
+        if module_review_equivalence_key is not None:
+            equivalence = tuple(
+                module_review_equivalence_key(
+                    seg,
+                    module,
+                    context_registry,
+                    precheck=precheck_by_id.get(seg["id"], []),
+                )
+                for module in required_modules(state)
+            )
+        else:
+            equivalence = (
                 seg.get("source", ""),
                 current_target(seg),
                 bool(seg.get("protected")),
+                seg.get("input_status", "ready"),
                 seg.get("content_type"),
                 seg.get("text_type_context"),
                 seg.get("context_note"),
@@ -613,9 +710,8 @@ def cmd_split(a):
                     sort_keys=True,
                     separators=(",", ":"),
                 ),
-            ),
-            [],
-        ).append(seg)
+            )
+        groups.setdefault(equivalence, []).append(seg)
     reps, dedup_map = [], {}
     for gsegs in groups.values():          # dict 保序：组按首次出现序
         rep = min(gsegs, key=lambda s: s["id"])
@@ -650,10 +746,14 @@ def cmd_split(a):
             hits = _term_hits(src_txt, titems)
             near = _tn_suggest(tn_idx, src_txt, exclude={h["source"] for h in hits}) \
                 if tn_idx else []
-            rows.append({
+            row_payload = {
                 "id": seg["id"],
+                "segment_key": seg.get("segment_key"),
                 "source": src_txt,
                 "target": current_target(seg),
+                "input_status": seg.get("input_status", "ready"),
+                "input_block_reasons": seg.get("input_block_reasons", []),
+                "input_warnings": seg.get("input_warnings", []),
                 "content_type": seg.get("content_type"),
                 "text_type_context": seg.get("text_type_context"),
                 "context_note": seg.get("context_note"),
@@ -665,7 +765,26 @@ def cmd_split(a):
                 "term_hits": hits,
                 "term_near": near,
                 "protected_texts": seg.get("protected_texts", []),
-            })
+                "context": copy.deepcopy(seg.get("context")),
+                "resolved_constraints": copy.deepcopy(
+                    seg.get("resolved_constraints", [])
+                ),
+                "segment_revision_digest": seg.get("segment_revision_digest"),
+                "module_review_equivalence_keys": {
+                    module: (
+                        module_review_equivalence_key(
+                            seg,
+                            module,
+                            context_registry,
+                            precheck=precheck_by_id.get(seg["id"], []),
+                        )
+                        if module_review_equivalence_key is not None
+                        else None
+                    )
+                    for module in required_modules(state)
+                },
+            }
+            rows.append(row_payload)
         vols.append(sum(len(r["source"]) + len(r["target"]) for r in rows))
         chunk_payloads.append(
             add_chunk_payload_digest({
@@ -674,6 +793,9 @@ def cmd_split(a):
                 "state_fingerprint": revision["state_fingerprint"],
                 "split_fingerprint": split_fingerprint,
                 "review_policy": review_policy,
+                "resolved_context_descriptors": copy.deepcopy(
+                    context_registry or {}
+                ),
                 "segments": rows,
             })
         )
@@ -766,7 +888,11 @@ def _cmd_merge_unlocked(a, state: dict, outdir: Path):
     state_segments = state["segments"]
     state_by_id = {segment["id"]: segment for segment in state_segments}
     ids = [segment["id"] for segment in state_segments]
-    protected_ids = {segment["id"] for segment in state_segments if segment.get("protected")}
+    protected_ids = {
+        segment["id"]
+        for segment in state_segments
+        if segment.get("protected") or segment.get("input_status") == "blocked"
+    }
     output_path = Path(a.out)
     bound_results = requires_bound_artifacts(state)
     contract_path = result_contract_path(output_path)
@@ -981,6 +1107,7 @@ def cmd_merge(a):
     outdir = Path(a.outdir)
     with generation_lock(outdir, exclusive=False):
         state = load(a.state)
+        require_current_job_runtime(state, "merge")
         _cmd_merge_unlocked(a, state, outdir)
 
 
@@ -1042,10 +1169,41 @@ def module_receipt_path(module_path: Path) -> Path:
     return path.with_name(f"{path.stem}.receipt.json")
 
 
+def _normalize_review_provenance(value: object) -> dict:
+    if not isinstance(value, dict) or set(value) != {
+        "review_packet_digest",
+        "selected_evidence_index_digest",
+        "worker_receipt",
+    }:
+        raise CheckFormatError("module receipt review provenance is invalid")
+    for field in ("review_packet_digest", "selected_evidence_index_digest"):
+        digest = value.get(field)
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise CheckFormatError(f"module receipt {field} is invalid")
+    worker = value.get("worker_receipt")
+    if worker is not None:
+        if not isinstance(worker, dict) or set(worker) != {"worker_id", "run_id"}:
+            raise CheckFormatError("module receipt worker_receipt is invalid")
+        for field in ("worker_id", "run_id"):
+            text = worker.get(field)
+            if (
+                not isinstance(text, str)
+                or not text
+                or text != text.strip()
+                or "\x00" in text
+            ):
+                raise CheckFormatError(
+                    f"module receipt worker_receipt.{field} is invalid"
+                )
+    return copy.deepcopy(value)
+
+
 def build_module_receipt(
     payload: dict,
     manifest: dict,
     destination: Path,
+    *,
+    review_provenance: dict | None = None,
 ) -> dict:
     receipt = {
         "schema": MODULE_RECEIPT_SCHEMA,
@@ -1058,6 +1216,10 @@ def build_module_receipt(
         "chunk_id": payload["chunk_id"],
         "module_output_digest": canonical_digest(payload),
     }
+    if review_provenance is not None:
+        receipt["review_provenance"] = _normalize_review_provenance(
+            review_provenance
+        )
     receipt["receipt_digest"] = canonical_digest(receipt)
     return receipt
 
@@ -1078,7 +1240,13 @@ def validate_module_receipt(
         raise CheckFormatError(
             f"{receipt_path.name}: publication receipt is invalid"
         )
-    expected = build_module_receipt(payload, manifest, destination)
+    review_provenance = actual.get("review_provenance")
+    expected = build_module_receipt(
+        payload,
+        manifest,
+        destination,
+        review_provenance=review_provenance,
+    )
     if actual != expected:
         raise CheckFormatError(
             f"{receipt_path.name}: publication receipt mismatch"
@@ -1196,6 +1364,20 @@ def _module_issue_problem(state: dict, module: str, issue: dict) -> str | None:
     allowed = _MODULE_ALLOWED_CATEGORIES.get(module)
     if allowed is not None and category not in allowed:
         return f"{module} cannot own category {category!r}"
+    if (
+        state.get("job_runtime_contract_version") == 2
+        and module == "terminology"
+        and issue.get("needs_confirmation") is True
+        and issue.get("resolution_status") not in {
+            "reference_allowed",
+            "human_choice_required",
+            "conflict",
+        }
+    ):
+        return (
+            "terminology findings that need confirmation must declare whether "
+            "a reference is allowed, a human choice is required, or evidence conflicts"
+        )
     return None
 
 
@@ -1386,6 +1568,13 @@ def _issue_key(issue):
             sort_keys=True,
         ),
         json.dumps(issue.get("edit"), ensure_ascii=False, sort_keys=True),
+        issue.get("resolution_status"),
+        json.dumps(issue.get("reason_codes"), ensure_ascii=False),
+        json.dumps(
+            issue.get("non_authorizing_evidence"),
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
     )
 
 
@@ -1576,6 +1765,7 @@ def cmd_merge_checks(a):
     job = Path(a.job)
     with generation_lock(job / "chunks", exclusive=False):
         state = load(job / "state.json")
+        require_current_job_runtime(state, "merge-checks")
         _cmd_merge_checks_unlocked(a, state)
 
 
@@ -1657,6 +1847,7 @@ def cmd_reconcile(a):
     job = Path(a.job)
     with generation_lock(job / "chunks", exclusive=False):
         state = load(job / "state.json")
+        require_current_job_runtime(state, "reconcile")
         _cmd_reconcile_unlocked(a, state)
 
 
@@ -1666,6 +1857,7 @@ def cmd_publish_module(a):
     raw_path = Path(a.input)
     with generation_lock(outdir, exclusive=True):
         state = load(job / "state.json")
+        require_current_job_runtime(state, "publish-module")
         manifest, bases, _, _, _ = _load_verified_generation_unlocked(
             job / "state.json",
             job / "errors_precheck.json",
@@ -1676,6 +1868,14 @@ def cmd_publish_module(a):
         if a.module not in allowed:
             raise SystemExit(
                 f"[publish-module] module {a.module!r} is not enabled"
+            )
+        if (
+            a.module in required_modules(state)
+            and not getattr(a, "_compact_review_validated", False)
+        ):
+            raise SystemExit(
+                "[publish-module] required AI modules must be published through "
+                "lqe_review.py publish with a current worker-context packet"
             )
         base = next(
             (item for item in bases if item["chunk_id"] == a.chunk),
@@ -1794,7 +1994,10 @@ def cmd_split_half(a):
     产出 chunk_NN_p1.json / chunk_NN_p2.json，并按模块继承断点。
     按 id 归属把已判条目分别转给 p1/p2 的 ckpt.jsonl——已判过的不会因为二分而白费，
     两个新任务读取断点后会跳过已完成条目，只检查各自剩余内容。"""
-    outdir = Path(a.job) / "chunks"
+    job = Path(a.job)
+    state = load(job / "state.json")
+    require_current_job_runtime(state, "split-half")
+    outdir = job / "chunks"
     ci = int(a.chunk)
     data = load(outdir / f"chunk_{ci:02d}.json")
     segs = data["segments"]
@@ -1905,7 +2108,15 @@ def main():
     s.add_argument("--errors", required=True)
     s.add_argument("--terms", default=None)
     s.add_argument("--outdir", required=True)
-    s.add_argument("--size", type=int, default=100)
+    s.add_argument(
+        "--size",
+        type=int,
+        default=None,
+        help=(
+            "maximum segments per chunk; defaults to 5 for context enforce "
+            "jobs and 100 for off/shadow jobs"
+        ),
+    )
     s.add_argument("--char-budget", type=int, default=0,
                    help="按源文和译文总字符数分块；0 表示固定按 --size 分块，--size 始终是段数上限")
     s.set_defaults(fn=cmd_split)

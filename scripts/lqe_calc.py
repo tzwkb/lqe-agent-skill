@@ -9,6 +9,7 @@ from lqe_corrections import CheckFormatError, verify_results
 from lqe_engine import (
     get_review_policy,
     read_json,
+    require_current_job_runtime,
     requires_bound_artifacts,
     validate_scope_entries,
 )
@@ -103,6 +104,7 @@ def main():
     protected = _parse_protected_ids(args.protected_ids)
     protected.update(_load_protected_file(args.protected_file))
     initial_state = read_json(state_path)
+    require_current_job_runtime(initial_state, "calc")
     if not requires_bound_artifacts(initial_state):
         state = initial_state
         errors = read_json(errors_path)
@@ -182,6 +184,15 @@ def main():
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+        return
+    if result["score"] is None:
+        print(
+            f"SCORE=N/A STATUS={result['status']} "
+            f"REVIEW_STATUS={result.get('review_status', 'INPUT_BLOCKED')} "
+            f"ERRORS={result['errors']} WORDCOUNT={result['wordcount']} "
+            f"CRITICAL={result['critical']} REPEATED={result['repeated']} "
+            "NPT/1000=N/A"
+        )
         return
     gate_note = " (CRITICAL_GATE)" if result["critical_gate"] else ""
     print(

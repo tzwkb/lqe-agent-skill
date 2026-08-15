@@ -42,7 +42,12 @@ def state_reference_paths(state: dict) -> dict[str, Path]:
         "checks_path",
         "confirmed_rules_path",
         "source_manifest_path",
+        "tabular_source_manifest_path",
         "tm_candidates_path",
+        "capability_resolution_path",
+        "project_asset_snapshot_path",
+        "context_overrides_path",
+        "context_gap_report_path",
     )
     for field in single_fields:
         value = state.get(field)
@@ -53,6 +58,11 @@ def state_reference_paths(state: dict) -> dict[str, Path]:
         for index, value in enumerate(values):
             if isinstance(value, str) and value.strip():
                 references[f"input_paths[{index}]"] = Path(value)
+    asset_paths = state.get("project_asset_paths")
+    if isinstance(asset_paths, dict):
+        for asset_id, value in asset_paths.items():
+            if isinstance(value, str) and value.strip():
+                references[f"project_asset_paths.{asset_id}"] = Path(value)
     return references
 
 

@@ -55,13 +55,23 @@ lqe-translator/
 └── jobs/<任务名>/
     ├── state.json
     ├── scope.json
-    ├── source_manifest.json       # SDLXLIFF 任务
+    ├── tabular_source_manifest.json # 表格任务
+    ├── source_manifest.json         # SDLXLIFF 任务
     ├── tm_candidates.json         # SDLXLIFF 任务
+    ├── capability_resolution.json
+    ├── project_asset_snapshot.json
+    ├── project_assets/
+    ├── shadow_context/context.json # 仅 shadow 模式
     ├── confirmed_rules.md
     ├── errors_precheck.json
     ├── errors.json
     ├── chunks/
-    ├── review_packets/
+    ├── review_packets/context/<module>/batch_NN/
+    ├── suggestion_context/
+    ├── reference_suggestions.packet.json
+    ├── reference_suggestions.candidates.json
+    ├── suggestion_review.packet.json
+    ├── suggestion_review.json
     ├── reference_suggestions.json
     ├── <任务名>_lqe.xlsx
     └── <任务名>_corrected.<csv|tsv|xlsx>
@@ -70,7 +80,7 @@ lqe-translator/
 ## 安装与路径
 
 ```bash
-pip install "openpyxl>=3.1" regex requests python-docx -q
+pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q
 SCRIPTS=~/.codex/skills/lqe-translator/scripts
 ```
 
@@ -85,6 +95,8 @@ python3 scripts/run_tests.py
 ### 1. 初始化
 
 优先使用项目档案；一个参数即可加载语言设置、检查项、确认规则、术语和风格指南。
+
+Profile v2 可用 `module_context_views` 按模块声明 capability、dimension、邻句窗口，以及人物事实、关系和审核案例数量上限。`max_runtime_examples: 0` 表示不提供案例。`off` 不启用 optional view，`shadow` 只写入 `state.shadow_module_context_views` 供审计，`enforce` 才进入正式 worker 输入。shadow typed asset 即使自称 core capability 也不能进入正式 bundle；显式标记 `attributes.runtime_rule: false` 的关系同样会被排除。
 
 新任务初始化前，Agent 必须先询问用户选择审校输出模式，除非当前请求已明确：`optimized` 为降本模式，`full` 为完整模式。选择通过 `--review-mode` 写入 `state.review_policy`；已有 job 直接沿用 state，不中途切换。
 
@@ -102,6 +114,17 @@ python3 "$SCRIPTS/lqe_io.py" read \
 项目档案必须声明 `language_pair`、`source_lang` 和 `target_lang`。运行检查前，必须读取项目背景、`confirmed_rules.md`、风格指南和语言说明。
 
 初始化先在 staging 中生成并校验全部资源，拒绝输入/输出/资源别名（含软链和硬链），最后发布 `state.json`。失败时不留下正式 `state.json`、`scope.json`、`terms.json` 或半套 SDL 资源。
+
+客户没有逐句情境时，先生成缺口报告和人工待补模板；程序不会自动猜说话人、受话人、场景、关系阶段、语气或文本类型：
+
+```bash
+python3 "$SCRIPTS/lqe_context_overrides.py" gaps \
+  --state "$JOB/state.json" --out "$JOB/context_gap_report.json"
+python3 "$SCRIPTS/lqe_context_overrides.py" scaffold \
+  --state "$JOB/state.json" --out "$JOB/context_overrides.template.json"
+```
+
+人工或授权来源核实后，用 `read --context-overrides <已核实.json>` 新建 job。sidecar 不能绕过 shadow；key、源文摘要、授权、字段声明、冲突和必填上下文全部整批校验。歧义别名的模板会在 `expected_context` 记录当前原值，只有原值仍精确一致时才允许替换为人工确认的 canonical ID。通过后，sidecar、缺口报告及其 fingerprint 同时绑定进 state 和 source manifest；失败不修改原输入或原 job。运行顺序固定为项目 canonical segment override、本任务已核实 sidecar、语言/语域规则，因此规则只能依据当前 job 已绑定的情境作出结论。缺口状态区分 `not_provided`、`unresolved_alias`、`ambiguous_alias` 和 `not_applicable`。
 
 任务明确不检查术语和专名时，在 `read` 中加入 `--no-terminology`。该参数覆盖 profile 术语配置，且不能与显式 `--terminology <file>` 同时使用：
 
@@ -219,16 +242,15 @@ python3 "$SCRIPTS/lqe_io.py" pre-check \
 python3 "$SCRIPTS/lqe_chunk.py" split \
   --state "$JOB/state.json" \
   --errors "$JOB/errors_precheck.json" \
-  --outdir "$JOB/chunks" \
-  --size 100
+  --outdir "$JOB/chunks"
 
 python3 "$SCRIPTS/lqe_review.py" prepare --job "$JOB"
 python3 "$SCRIPTS/lqe_review.py" auto-publish --job "$JOB"
 ```
 
-标准模式下，`split` 通过 state 读取术语；`--terms <file>` 只是可选覆盖，无术语模式会拒绝该参数。分块输入带指纹；state、当前译文、scope、预检、术语或分块参数变化时，旧 chunks 会归档，旧模块输出不可复用。每个 `chunk_NN.json` 按 `state.check_scope` 生成：
+标准模式下，`split` 通过 state 读取术语；`--terms <file>` 只是可选覆盖，无术语模式会拒绝该参数。未显式传 `--size` 时，enforce 上下文任务默认每块最多 5 段，off/shadow 保持原来的 100 段；显式 `--size` 始终优先。该默认值为富上下文预留 worker 输入空间；`prepare` 仍执行 100,000 字节硬校验，不可再拆的单段超限时失败而不截断。分块输入带指纹；state、当前译文、scope、预检、术语或最终生效的分块参数变化时，旧 chunks 会归档，旧模块输出不可复用。每个 `chunk_NN.json` 按 `state.check_scope` 生成：
 
-`prepare` 生成与当前 chunk 绑定的模块专用 `review_packets`、`batch_plan.json` 和 `cost_report.json`。非术语模块不再重复读取术语与预检字段；受保护段和 `precheck_review` 的不适用段由脚本补空。`auto-publish` 只发布完全不需要 AI 的 packet。
+`prepare` 生成与当前 chunk 绑定的模块专用 `review_packets`、`batch_plan.json`、`cost_report.json` 和 `selected_evidence_index.json`。该索引记录各 checker 模块对每个句段实际选中的证据，而不是更宽泛的配置视图。非术语模块不再重复读取术语与预检字段；受保护段和 `precheck_review` 的不适用段由脚本补空。`auto-publish` 只发布完全不需要 AI 的 packet。
 
 ```text
 # 标准模式
@@ -244,9 +266,9 @@ chunk_NN.grammar.json
 chunk_NN.naturalness.json
 ```
 
-按 `batch_plan.json` 为每个模块分配有界 worker：每批最多 4 个 packet，同时不超过 25,000 原译字符或 100,000 packet 字节；单个超限 packet 独占一个 worker。每个新批次重新读取模块说明和项目上下文。
+按 `batch_plan.json` 为每个模块分配有界 worker：每批最多 4 个 packet，同时不超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。每份可读资料都必须带安全的 `job_relative`、`skill_relative` 或 `embedded_text` locator，其内容摘要和字节数计入预算。不可再拆的最小单元仍超限时直接失败，不截断。每个新批次重新读取模块说明和项目上下文。
 
-模型写紧凑草稿：`reviewed_ids` 完整复制 packet，`findings` 只保留有问题的 id。用 `lqe_review.py publish --job "$JOB" --chunk <NN> --module <module> --input <草稿.json>` 发布。publisher 会补齐正式全 ID 数组，并按原合同校验类别、预检引用和 generation 指纹。
+模型写紧凑草稿：`reviewed_ids` 完整复制 packet，`findings` 只保留有问题的 id；同时复制 selected evidence 绑定，并填写实际 checker 的 `worker_id` 与本次唯一 `run_id`。用 `lqe_review.py publish --job "$JOB" --chunk <NN> --module <module> --input <草稿.json>` 发布。publisher 会补齐正式全 ID 数组，并把 packet、checker receipt 与 `selected_evidence_index.json` 绑定到正式 module publication receipt。
 
 `precheck_review` 只确认或删除 Markup、Length、Locale convention、Company style、Inconsistency、Other 类别的非术语预检，不得创建 Terminology、`TERM REVIEW:` 或 `confirmed_term` 证据。
 
@@ -259,6 +281,13 @@ chunk_NN.naturalness.json
   "module": "grammar",
   "chunk_id": 0,
   "packet_digest": "<packet.packet_digest>",
+  "worker_batch_id": "<packet.worker_batch_id>",
+  "worker_packet_basis_digest": "<packet.worker_packet_basis_digest>",
+  "context_bundle_set_digest": "<packet.context_bundle_set_digest>",
+  "worker_context_manifest_digest": "<packet.worker_context_manifest_digest>",
+  "selected_evidence_index_path": "<packet.selected_evidence_index_path>",
+  "selected_evidence_index_digest": "<packet.selected_evidence_index_digest>",
+  "worker_receipt": {"worker_id": "<actual-checker-worker>", "run_id": "<unique-run>"},
   "reviewed_ids": [0, 1, 2],
   "findings": [
     {
@@ -296,7 +325,18 @@ chunk_NN.naturalness.json
 
 `term_spans` 必须恰有 `source` 和 `target` 两个数组。每个 span 对象恰有整数 `start`、整数 `end` 和非空 `text`，使用 0-based、左闭右开的非空区间；数组按 `(start,end,text)` 升序排列，不得重复或重叠。`text` 必须严格等于原文或当前译文的对应切片，且每个 source span 的 `text` 必须等于 `term_source`。`source` 非空；漏译或没有可安全定位的译文问题词时，`target` 可为空，不得猜测或整句标记。复核机器预检 Terminology issue 时，`term_source`、`expected_targets` 和 `term_spans.source` 为只读并按 `precheck_ref` 继承；模型必须精确补充 `term_spans.target`，确实没有可标译文词时保留空数组。新发现的 Terminology issue 必须完整提交三个结构化字段。
 
-表格中的 `content_type`、`text_type`、`文本类型`、`文本类别` 会作为上游文本分类传入 review packet，不自行分类。`optimized` 优先使用行级 `content_type`，否则使用 `text_type_context`，并按 `references/check_modules/common.md` 的矩阵调整重点；`full` 只把分类作为上下文，不改变检查强度。两种模式都不关闭机器预检或必需模块。
+表格中的 `content_type`、`text_type`、`文本类型`、`文本类别` 会作为上游文本分类传入 review packet，不自行分类。`optimized` 优先使用行级 `content_type`，否则使用 `text_type_context`，并按 `references/check_modules/common.md` 的矩阵调整重点；`full` 只把分类作为上下文，不改变检查强度。两种模式都不关闭机器预检或必需模块。普通源文永远不会因为内容像“类型标题”而被跳过；只有 profile 的 `tabular.text_type_marker_rules` 显式声明的标记行才会被识别并审计。
+
+新任务同时绑定稳定句段身份、来源证据以及项目资产/能力快照。输入含显式上下文时使用 `--sheet`、`--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`。可选能力只有在 `enforce` 模式才进入正式 packet；`shadow` 写入独立 `shadow_context/context.json`，不进入正式去重、审校、建议或报告。旧 `.xls` 由 `xlrd>=2.0` 只读，corrected 固定输出 `.xlsx`。
+
+profile v2 用 asset registry 声明资料的路径、权威级别、来源和分发范围，并用 capability registry 决定各模块能读取什么。人物、关系、剧情示例和语言规则应使用 canonical JSON 资产；模块启用 `language_policy.*` 并消费其结论时，必须同时声明对应 `constraint_kinds`，缺失会直接判 profile 无效，不再静默丢掉已解析规则。原始 XLSX/DOCX 可保留作溯源，但不会因放在目录里而自动注入。`worker_manifest.json` 通过安全、可核验的 locator 绑定每批 worker 实际读取的 instructions、SG、语言说明、共享资产、context bundle 和 packet。checker 的 `instructions.suggestions` 为 null，只有建议生成 worker 接收该说明；完整 project source manifest 保持 runtime 实时校验，worker 只接收计入预算的 canonical compact projection，不读取原始审计全文。`review_packets/selected_evidence_index.json` 逐模块、逐句段记录实际选中的证据，供后续建议阶段取严格并集。总输入上限为 100,000 bytes。
+
+跨 sheet/版本核对使用 `--pivot-sheet`、`--pivot-key-col`、可重复的 `--pivot-compare` 和显式 `--pivot-authority`；同 key 不完整、重复或 authoritative 值冲突会在审校前阻断。历史任务缺 `job_runtime_contract_version: 2` 时只能验证既有产物；续跑需用：
+
+```bash
+python3 "$SCRIPTS/lqe_io.py" reread \
+  --from-job <旧任务> --input <原输入> --job <新任务>
+```
 
 ### 5. 校验、合并和评分
 
@@ -322,11 +362,17 @@ python3 "$SCRIPTS/lqe_calc.py" \
 ```bash
 python3 "$SCRIPTS/lqe_suggestions.py" prepare \
   --job "$JOB" --severities "Major,Critical" --only-missing
-python3 "$SCRIPTS/lqe_suggestions.py" publish \
+python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates \
   --job "$JOB" --input <参考建议草稿.json>
+python3 "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB"
+python3 "$SCRIPTS/lqe_suggestion_review.py" publish-review \
+  --job "$JOB" --input <建议复核草稿.json>
+python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
-`optimized` 默认只将 Major/Critical 放入建议 packet；`full` 默认纳入全部严重度。是否提交完整建议译文始终由 Agent 根据可靠性判断，未提交建议不影响问题说明。建议 artifact 版本为 3，旧版本需重新 prepare 和 publish。
+`optimized` 默认只将 Major/Critical 放入候选；`full` 默认纳入全部严重度。未解决术语结论、blocked/保护段和约束冲突在生成前直接拒绝；生成后再按候选文本重评已解析约束。明确不匹配的候选硬拒绝，无法确定的候选交给独立 verifier。只有验收通过的候选才能进入 v5 正式建议；candidate、review 或 final 摘要过期均 fail closed。
+
+缺少说话人、受话人或关系字段不等于自动弃权。若源文已经明确 speech act、强度或敌意，且候选不需要选择未知关系、称谓、代词、礼貌等级或角色口吻即可保持这些信息，生成 worker 应引用源文证据继续生成。正式候选的 `tone_decision.uncertainties` 必须为空：已解决或通过中性表达规避的缺口写入 evidence；仍会改变译文的未知信息必须弃权，不能带着不确定性进入发布链。
 
 首轮检查应明确使用 `single`：
 

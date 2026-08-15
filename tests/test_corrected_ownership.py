@@ -36,6 +36,13 @@ from lqe_report_contract import attach_report_contract, validate_report_contract
 
 
 def write_json(path, value):
+    if (
+        (path.name == "state.json" or path.name.endswith("-state.json"))
+        and isinstance(value, dict)
+        and isinstance(value.get("segments"), list)
+        and "job_runtime_contract_version" not in value
+    ):
+        value["job_runtime_contract_version"] = 2
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -284,6 +291,7 @@ class CorrectedOwnershipChunkTests(unittest.TestCase):
             needs_confirmation=True,
             target_terms=("x",),
         )
+        terminology["resolution_status"] = "reference_allowed"
         accuracy = check_issue(
             category="Omission",
             severity="Major",
@@ -712,6 +720,7 @@ class CorrectedOwnershipChunkTests(unittest.TestCase):
             needs_confirmation=True,
             target_terms=("ฟลอโรรา",),
         )
+        pending_name["resolution_status"] = "reference_allowed"
         spacing = check_issue(
             category="Punctuation",
             comment="space before hyphen",
@@ -2554,6 +2563,8 @@ class CorrectedOwnershipRegressionTests(unittest.TestCase):
             "repeated": 0,
             "npt": 125.0,
             "critical_gate": False,
+            "blocked_segments": 0,
+            "total_wordcount": 100,
         }
 
         self.assertEqual(self.score_result("base", base), expected)

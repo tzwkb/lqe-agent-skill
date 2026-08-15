@@ -42,6 +42,33 @@ def make_xlsx(path, rows, headers=("原文", "译文")):
     wb.save(path)
 
 
+def make_text_type_marker_profile(path):
+    path.mkdir(parents=True, exist_ok=True)
+    profile = path / "profile.json"
+    profile.write_text(json.dumps({
+        "name": "test/zh-en-marker-rows",
+        "language_pair": "zh-en",
+        "source_lang": "zh",
+        "target_lang": "en",
+        "wordcount_basis": "source-chars",
+        "tabular": {
+            "text_type_marker_rules": [
+                {
+                    "id": "dialogue",
+                    "source_equals": "对话类文本",
+                    "text_type_from": "source",
+                },
+                {
+                    "id": "inner-page",
+                    "source_equals": "游戏内侧页文本",
+                    "text_type_from": "source",
+                },
+            ]
+        },
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return profile
+
+
 def load_errs(path):
     return {r["id"]: [e["comment"] for e in r["issues"]] for r in json.loads(Path(path).read_text(encoding="utf-8"))}
 
@@ -231,7 +258,8 @@ def t5():
     (TMP / "cm_checks.json").write_text(json.dumps({"builtin": {}, "custom": [
         {"id": "cm-probe", "type": "count_match", "pattern": "#P\\d+#",
          "category": "Markup", "severity": "Major", "comment": "tag #Pn# count"}]}), encoding="utf-8")
-    state = {"wordcount": 10, "language_pair": "zh-en", "checks_path": str(TMP / "cm_checks.json"),
+    state = {"job_runtime_contract_version": 2,
+             "wordcount": 10, "language_pair": "zh-en", "checks_path": str(TMP / "cm_checks.json"),
              "segments": [{"id": 0, "source": "按#P1#键和#P2#键。", "target": "Press #P1#.",
                            "corrected": None, "max_len": None, "iter": 0}]}
     (TMP / "cm_state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
@@ -241,7 +269,7 @@ def t5():
 
 # ── T6: N4 repeat dedup in calc ───────────────────────────────────────────────
 def t6():
-    state = {"wordcount": 100, "segments": [
+    state = {"job_runtime_contract_version": 2, "wordcount": 100, "segments": [
         {"id": i, "source": "重复句。", "target": "Dup sentence.", "corrected": None} for i in range(3)]}
     errors = [{"id": i, "errors": [{"category": "Mistranslation", "severity": "Major",
                                     "comment": "wrong"}], "corrected": None} for i in range(3)]
@@ -309,8 +337,15 @@ def t7():
         return
 
     state = json.loads((job / "state.json").read_text(encoding="utf-8"))
-    base = json.loads((job / "chunks/chunk_00.json").read_text(encoding="utf-8"))
     modules = state["check_scope"]["enabled_modules"]
+    r = run("lqe_review.py", "prepare", "--job", str(job))
+    check("T7 review prepare", r.returncode == 0, r.stderr[-300:])
+    if r.returncode != 0:
+        return
+    r = run("lqe_review.py", "auto-publish", "--job", str(job))
+    check("T7 review auto-publish", r.returncode == 0, r.stderr[-300:])
+    if r.returncode != 0:
+        return
     issue = {
         "category": "Spelling",
         "severity": "Major",
@@ -325,18 +360,51 @@ def t7():
         },
     }
     for module in modules:
-        entries = [
+        packet = json.loads(
+            (job / f"review_packets/{module}/chunk_00.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if not packet["requires_ai"]:
+            continue
+        findings = [
             {
                 "id": segment["id"],
                 "issues": [issue] if module == "grammar" and segment["id"] == 0 else [],
             }
-            for segment in base["segments"]
+            for segment in packet["segments"]
         ]
+        findings = [entry for entry in findings if entry["issues"]]
+        draft_payload = {
+            "schema": "lqe.compact-module-draft",
+            "version": 1,
+            "module": module,
+            "chunk_id": packet["chunk_id"],
+            "packet_digest": packet["packet_digest"],
+            "worker_batch_id": packet["worker_batch_id"],
+            "worker_packet_basis_digest": packet["worker_packet_basis_digest"],
+            "context_bundle_set_digest": packet["context_bundle_set_digest"],
+            "worker_context_manifest_digest": packet[
+                "worker_context_manifest_digest"
+            ],
+            "selected_evidence_index_path": packet[
+                "selected_evidence_index_path"
+            ],
+            "selected_evidence_index_digest": packet[
+                "selected_evidence_index_digest"
+            ],
+            "worker_receipt": {
+                "worker_id": f"smoke-checker.{module}",
+                "run_id": f"chunk-{packet['chunk_id']}",
+            },
+            "reviewed_ids": packet["reviewed_ids"],
+            "findings": findings,
+        }
         draft = job / f"{module}.draft.json"
-        draft.write_text(json.dumps(entries), encoding="utf-8")
+        draft.write_text(json.dumps(draft_payload), encoding="utf-8")
         r = run(
-            "lqe_chunk.py",
-            "publish-module",
+            "lqe_review.py",
+            "publish",
             "--job",
             str(job),
             "--chunk",
@@ -345,10 +413,6 @@ def t7():
             module,
             "--input",
             str(draft),
-            "--split-fingerprint",
-            base["split_fingerprint"],
-            "--chunk-payload-digest",
-            base["payload_digest"],
         )
         check(f"T7 publish {module}", r.returncode == 0, r.stderr[-300:])
         if r.returncode != 0:
@@ -451,7 +515,7 @@ def t9():
 def t10():
     job = TMP / "j10"
     job.mkdir(parents=True, exist_ok=True)
-    state = {"segments": [
+    state = {"job_runtime_contract_version": 2, "segments": [
         {"id": 0, "source": "看到一只里奥。", "target": "Saw a ลีโอ.",
          "content_type": "剧情", "text_type_context": "故事类文本"},
         {"id": 1, "source": "马尔文来了。", "target": "มาร์วิน is here."},
@@ -571,7 +635,7 @@ def t13():
     check("T13 legacy weight audience", profile["category_weights"]["Audience appropriateness"] == 1.5)
     check("T13 legacy forced length", profile["forced_severity"]["Length"] == "Major")
 
-    state = {"wordcount": 100, "segments": [
+    state = {"job_runtime_contract_version": 2, "wordcount": 100, "segments": [
         {"id": 0, "source": "甲。", "target": "A.", "corrected": None},
         {"id": 1, "source": "乙。", "target": "B.", "corrected": None},
     ]}
@@ -612,7 +676,7 @@ def t14():
     check("T14 template file exists",
           (SCRIPTS.parent / "scorecard_profiles/lqe_2026" / profile["report_template"]["path"]).exists())
 
-    state = {"wordcount": 1000, "segments": [
+    state = {"job_runtime_contract_version": 2, "wordcount": 1000, "segments": [
         {"id": 0, "source": "甲。", "target": "A.", "corrected": None},
         {"id": 1, "source": "乙。", "target": "B.", "corrected": None},
         {"id": 2, "source": "丙。", "target": "C.", "corrected": None},
@@ -644,8 +708,10 @@ def t15():
         "4,打开背包,Open Inventory,success,UI,[]\n",
         encoding="utf-8-sig"
     )
+    profile = make_text_type_marker_profile(TMP / "marker-profile")
     r = run("lqe_io.py", "read", "--input", str(p), "--source-col", "source",
             "--target-col", "translation", "--target-lang", "en",
+            "--project", str(profile),
             "--out", str(TMP / "j15/state.json"))
     check("T15 csv read rc", r.returncode == 0, r.stderr[-300:])
     if r.returncode != 0:
@@ -740,8 +806,10 @@ def t18():
     ws.append(["打开背包", "Open Inventory", "UI"])
     wb.save(p)
 
+    profile = make_text_type_marker_profile(TMP / "marker-profile")
     r = run("lqe_io.py", "read", "--input", str(p), "--source-col", "source",
             "--target-col", "translation", "--target-lang", "en",
+            "--project", str(profile),
             "--out", str(TMP / "j18/state.json"))
     check("T18 xlsx marker read rc", r.returncode == 0, r.stderr[-300:])
     if r.returncode != 0:
@@ -834,8 +902,12 @@ def t22():
     for prof_path in sorted(root.glob("projects/*/*/profile.json")):
         prof = json.loads(prof_path.read_text(encoding="utf-8"))
         base = prof_path.parent
+        assets = prof.get("assets") or {}
         for key in ("style_guide", "terminology", "checks", "confirmed_rules"):
             val = prof.get(key)
+            declaration = assets.get(key) or {}
+            if declaration.get("availability") == "external":
+                continue
             if val and not (base / val).exists():
                 missing.append(f"{prof_path.relative_to(root)}:{key}:{val}")
         tm = prof.get("tm") or {}

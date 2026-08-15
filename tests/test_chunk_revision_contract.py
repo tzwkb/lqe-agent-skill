@@ -29,9 +29,17 @@ from lqe_split_contract import (
     validate_dedup_payload,
     validate_live_manifest,
 )
+from tests.runtime_helpers import bind_empty_runtime_context, publish_compact_modules
 
 
 def write_json(path: Path, value: object) -> None:
+    if (
+        path.name == "state.json"
+        and isinstance(value, dict)
+        and isinstance(value.get("segments"), list)
+        and "job_runtime_contract_version" not in value
+    ):
+        value = {**value, "job_runtime_contract_version": 2}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -347,6 +355,7 @@ class SplitContractCommandTests(unittest.TestCase):
                 {"id": 1, "source": "Two", "target": "Second"},
             ],
         }
+        bind_empty_runtime_context(self.state)
         write_json(self.state_path, self.state)
         write_json(
             self.precheck_path,
@@ -465,28 +474,14 @@ class SplitContractCommandTests(unittest.TestCase):
         )
         modules = ("precheck_review", "accuracy", "grammar", "naturalness")
         old_payloads = {}
+        empty_entries = [
+            {"id": 0, "issues": []},
+            {"id": 1, "issues": []},
+        ]
+        publish_compact_modules(
+            self.job, {module: empty_entries for module in modules}
+        )
         for module in modules:
-            draft = self.job / f"{module}.draft.json"
-            write_json(
-                draft,
-                [{"id": 0, "issues": []}, {"id": 1, "issues": []}],
-            )
-            published = self.run_chunk(
-                "publish-module",
-                "--job",
-                self.job,
-                "--chunk",
-                0,
-                "--module",
-                module,
-                "--input",
-                draft,
-                "--split-fingerprint",
-                old_base["split_fingerprint"],
-                "--chunk-payload-digest",
-                old_base["payload_digest"],
-            )
-            self.assertEqual(published.returncode, 0, published.stderr)
             old_payloads[module] = json.loads(
                 (
                     self.chunks / f"chunk_00.{module}.json"
@@ -506,28 +501,26 @@ class SplitContractCommandTests(unittest.TestCase):
         self.assertNotEqual(stale.returncode, 0)
         self.assertIn("stale module output", stale.stderr)
 
-        draft = self.job / "grammar.draft.json"
-        write_json(
-            draft,
-            [{"id": 0, "issues": []}, {"id": 1, "issues": []}],
-        )
-        late_publish = self.run_chunk(
-            "publish-module",
-            "--job",
-            self.job,
-            "--chunk",
-            0,
-            "--module",
-            "grammar",
-            "--input",
-            draft,
-            "--split-fingerprint",
-            old_base["split_fingerprint"],
-            "--chunk-payload-digest",
-            old_base["payload_digest"],
+        late_publish = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "lqe_review.py"),
+                "publish",
+                "--job",
+                str(self.job),
+                "--chunk",
+                "0",
+                "--module",
+                "grammar",
+                "--input",
+                str(self.job / "grammar.compact.json"),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
         )
         self.assertNotEqual(late_publish.returncode, 0)
-        self.assertIn("stale task", late_publish.stderr)
+        self.assertIn("packet tree is missing or stale", late_publish.stderr)
 
     def test_current_state_requires_verified_generation(self):
         self.state["artifact_contract_version"] = 1
@@ -573,6 +566,7 @@ class SplitContractCommandTests(unittest.TestCase):
                 "wordcount": 3,
             }
         )
+        bind_empty_runtime_context(self.state)
         write_json(self.state_path, self.state)
         machine_issue = {
             "category": "Untranslated",
@@ -631,25 +625,7 @@ class SplitContractCommandTests(unittest.TestCase):
                 {"id": 2, "issues": []},
             ],
         }
-        for module, entries in entries_by_module.items():
-            draft = self.job / f"{module}.draft.json"
-            write_json(draft, entries)
-            published = self.run_chunk(
-                "publish-module",
-                "--job",
-                self.job,
-                "--chunk",
-                0,
-                "--module",
-                module,
-                "--input",
-                draft,
-                "--split-fingerprint",
-                base["split_fingerprint"],
-                "--chunk-payload-digest",
-                base["payload_digest"],
-            )
-            self.assertEqual(published.returncode, 0, published.stderr)
+        publish_compact_modules(self.job, entries_by_module)
 
         formal_path = self.chunks / "chunk_00.grammar.json"
         formal = json.loads(formal_path.read_text(encoding="utf-8"))
@@ -661,22 +637,7 @@ class SplitContractCommandTests(unittest.TestCase):
         tampered = self.run_chunk("validate-checks", "--job", self.job)
         self.assertNotEqual(tampered.returncode, 0)
         self.assertIn("publication receipt mismatch", tampered.stderr)
-        republished = self.run_chunk(
-            "publish-module",
-            "--job",
-            self.job,
-            "--chunk",
-            0,
-            "--module",
-            "grammar",
-            "--input",
-            self.job / "grammar.draft.json",
-            "--split-fingerprint",
-            base["split_fingerprint"],
-            "--chunk-payload-digest",
-            base["payload_digest"],
-        )
-        self.assertEqual(republished.returncode, 0, republished.stderr)
+        publish_compact_modules(self.job, {"grammar": entries_by_module["grammar"]})
 
         merged_checks = self.run_chunk("merge-checks", "--job", self.job)
         self.assertEqual(merged_checks.returncode, 0, merged_checks.stderr)
@@ -823,6 +784,7 @@ class SplitContractCommandTests(unittest.TestCase):
             "comment": "AI confirmed the tag mismatch.",
             "precheck_ref": precheck_ref,
         }
+        entries_by_module = {}
         for module in (
             "precheck_review",
             "accuracy",
@@ -838,24 +800,8 @@ class SplitContractCommandTests(unittest.TestCase):
                 },
                 {"id": 1, "issues": []},
             ]
-            draft = self.job / f"{module}.draft.json"
-            write_json(draft, entries)
-            published = self.run_chunk(
-                "publish-module",
-                "--job",
-                self.job,
-                "--chunk",
-                0,
-                "--module",
-                module,
-                "--input",
-                draft,
-                "--split-fingerprint",
-                base["split_fingerprint"],
-                "--chunk-payload-digest",
-                base["payload_digest"],
-            )
-            self.assertEqual(published.returncode, 0, published.stderr)
+            entries_by_module[module] = entries
+        publish_compact_modules(self.job, entries_by_module)
         self.assertEqual(
             self.run_chunk("merge-checks", "--job", self.job).returncode,
             0,

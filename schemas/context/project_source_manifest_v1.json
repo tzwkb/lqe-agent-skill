@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/project_source_manifest_v1.json",
+  "title": "LQE project source manifest v1",
+  "type": "object",
+  "required": ["schema", "version", "project", "manifest_scope", "sources", "generated_assets", "coverage", "manifest_digest"],
+  "properties": {
+    "schema": {"const": "lqe.project-source-manifest"},
+    "version": {"const": 1},
+    "project": {"$ref": "#/$defs/nonempty"},
+    "manifest_scope": {"enum": ["internal", "public", "redacted"]},
+    "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+    "generated_assets": {"type": "array", "items": {"$ref": "#/$defs/generated"}},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "manifest_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "authority": {
+      "type": "object",
+      "required": ["issuer"],
+      "properties": {"issuer": {"$ref": "#/$defs/nonempty"}},
+      "additionalProperties": true
+    },
+    "container": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/nonempty"},
+        "name": {"$ref": "#/$defs/nonempty"},
+        "used_range": {"$ref": "#/$defs/nonempty"}
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "required": ["id", "kind", "sha256", "verification_status", "distribution", "authority", "availability"],
+      "properties": {
+        "id": {"$ref": "#/$defs/nonempty"},
+        "kind": {"$ref": "#/$defs/nonempty"},
+        "filename": {"$ref": "#/$defs/nonempty"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "verification_status": {"enum": ["source_backed", "verified"]},
+        "distribution": {"enum": ["public_allowed", "internal_only", "redacted"]},
+        "availability": {"enum": ["included", "external"]},
+        "authority": {"$ref": "#/$defs/authority"},
+        "containers": {"type": "array", "items": {"$ref": "#/$defs/container"}}
+      },
+      "additionalProperties": false
+    },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"$ref": "#/$defs/nonempty"},
+        "version": {"type": ["integer", "string"]}
+      },
+      "additionalProperties": false
+    },
+    "generated": {
+      "type": "object",
+      "required": ["asset_id", "kind", "path", "sha256", "derived_from", "distribution"],
+      "properties": {
+        "asset_id": {"$ref": "#/$defs/nonempty"},
+        "kind": {"$ref": "#/$defs/nonempty"},
+        "path": {"$ref": "#/$defs/nonempty"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "derived_from": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonempty"}, "uniqueItems": true},
+        "distribution": {"enum": ["public_allowed", "internal_only", "redacted"]},
+        "generator": {"$ref": "#/$defs/generator"}
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["total_nonempty", "converted", "normalized", "ignored", "unmapped", "details_path", "details_sha256"],
+      "properties": {
+        "total_nonempty": {"type": "integer", "minimum": 0},
+        "converted": {"type": "integer", "minimum": 0},
+        "normalized": {"type": "integer", "minimum": 0},
+        "ignored": {"type": "integer", "minimum": 0},
+        "unmapped": {"type": "integer", "minimum": 0},
+        "details_path": {"$ref": "#/$defs/nonempty"},
+        "details_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -23,6 +23,13 @@ import lqe_paths
 
 
 def write_json(path: Path, value: object) -> None:
+    if (
+        path.name == "state.json"
+        and isinstance(value, dict)
+        and isinstance(value.get("segments"), list)
+        and "job_runtime_contract_version" not in value
+    ):
+        value = {**value, "job_runtime_contract_version": 2}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 

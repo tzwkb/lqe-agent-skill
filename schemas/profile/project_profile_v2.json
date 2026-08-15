@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/lqe/project-profile-v2.json",
+  "title": "LQE project profile contract v2",
+  "type": "object",
+  "required": [
+    "profile_contract_version",
+    "name",
+    "language_pair",
+    "source_lang",
+    "target_lang",
+    "wordcount_basis",
+    "scoring_policy",
+    "assets",
+    "context_pipeline",
+    "capabilities"
+  ],
+  "properties": {
+    "profile_contract_version": {"const": 2},
+    "name": {"type": "string", "minLength": 1},
+    "language_pair": {"type": "string", "minLength": 1},
+    "source_lang": {"type": "string", "minLength": 1},
+    "target_lang": {"type": "string", "minLength": 1},
+    "wordcount_basis": {"enum": ["source-chars", "target-words"]},
+    "scoring_policy": {
+      "type": "object",
+      "required": [
+        "threshold",
+        "scorecard_profile",
+        "severity_scale",
+        "critical_gate",
+        "repeat_dedup"
+      ],
+      "properties": {
+        "threshold": {"type": "number", "minimum": 0, "maximum": 100},
+        "scorecard_profile": {"type": "string", "minLength": 1},
+        "severity_scale": {"type": "string", "minLength": 1},
+        "critical_gate": {"type": "boolean"},
+        "repeat_dedup": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "assets": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+      },
+      "additionalProperties": {
+        "$ref": "project_asset_v1.json"
+      }
+    },
+    "context_pipeline": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["off", "shadow", "enforce"]}
+      },
+      "additionalProperties": false
+    },
+    "module_context_views": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "terminology",
+          "precheck_review",
+          "accuracy",
+          "grammar",
+          "naturalness",
+          "proper_names",
+          "term_audit",
+          "suggestions"
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/module_context_view"}
+    },
+    "tabular": {
+      "type": "object",
+      "required": ["text_type_marker_rules"],
+      "properties": {
+        "text_type_marker_rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "source_equals"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "source_equals": {"type": "string", "minLength": 1},
+              "text_type_context": {"type": "string", "minLength": 1},
+              "text_type_from": {"enum": ["source", "target", "content_type"]}
+            },
+            "oneOf": [
+              {"required": ["text_type_context"]},
+              {"required": ["text_type_from"]}
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "capability_descriptors": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "capability_descriptor_v1.json"
+          }
+        },
+        {
+          "type": "array",
+          "items": {"$ref": "capability_descriptor_v1.json"}
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["context.core@1", "source_provenance@1"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["required"],
+        "properties": {
+          "required": {"type": "boolean"},
+          "config": {"type": "object"},
+          "asset": {"type": "string", "minLength": 1},
+          "provider": {
+            "oneOf": [
+              {"type": "string", "pattern": "^.+@[1-9][0-9]*$"},
+              {
+                "type": "object",
+                "required": ["id", "api_version"],
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "api_version": {"type": "integer", "minimum": 1}
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "module_context_view": {
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*(?:/[a-z][a-z0-9_.-]*)*@[1-9][0-9]*$"
+          },
+          "contains": {"const": "context.core@1"},
+          "uniqueItems": true
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "constraint_kinds": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonempty"},
+          "uniqueItems": true
+        },
+        "include_constraints": {"type": "boolean"},
+        "neighbors": {
+          "type": "object",
+          "properties": {
+            "before": {"type": "integer", "minimum": 0},
+            "after": {"type": "integer", "minimum": 0},
+            "include_target": {"type": "boolean"},
+            "boundary_mode": {"enum": ["same_if_present", "strict"]}
+          },
+          "additionalProperties": false
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_facts_per_entity": {"type": "integer", "minimum": 0},
+            "max_relations": {"type": "integer", "minimum": 0},
+            "max_runtime_examples": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

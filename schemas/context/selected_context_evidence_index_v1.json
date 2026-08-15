@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://langlobal.example/schemas/context/selected_context_evidence_index_v1.json",
+  "title": "LQE selected context evidence index v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "split_fingerprint",
+    "split_manifest_digest",
+    "profile",
+    "project_asset_snapshot",
+    "capability_resolution",
+    "modules",
+    "entries",
+    "index_digest"
+  ],
+  "properties": {
+    "schema": {"const": "lqe.selected-context-evidence-index"},
+    "version": {"const": 1},
+    "split_fingerprint": {"$ref": "#/$defs/nonempty"},
+    "split_manifest_digest": {"$ref": "#/$defs/sha256"},
+    "profile": {
+      "type": "object",
+      "required": ["digest", "overlay_digest"],
+      "properties": {
+        "digest": {"$ref": "#/$defs/sha256"},
+        "overlay_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "project_asset_snapshot": {"$ref": "#/$defs/digest_binding"},
+    "capability_resolution": {"$ref": "#/$defs/digest_binding"},
+    "modules": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/evidence_entry"}
+    },
+    "index_digest": {"$ref": "#/$defs/sha256"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "digest_binding": {
+      "type": "object",
+      "required": ["digest"],
+      "properties": {"digest": {"$ref": "#/$defs/sha256"}},
+      "additionalProperties": false
+    },
+    "segment_id": {
+      "oneOf": [
+        {"type": "integer"},
+        {"type": "string", "minLength": 1}
+      ]
+    },
+    "string_set": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonempty"},
+      "uniqueItems": true
+    },
+    "neighbor_receipt": {
+      "type": "object",
+      "required": [
+        "ordinal",
+        "id",
+        "segment_key",
+        "source_digest",
+        "context_digest",
+        "target_digest",
+        "target_status"
+      ],
+      "properties": {
+        "ordinal": {"type": "integer", "minimum": 0},
+        "id": {"$ref": "#/$defs/segment_id"},
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "source_digest": {"$ref": "#/$defs/sha256"},
+        "context_digest": {"$ref": "#/$defs/sha256"},
+        "target_digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "target_status": {"enum": ["omitted", "verified", "unverified"]}
+      },
+      "additionalProperties": false
+    },
+    "evidence_entry": {
+      "type": "object",
+      "required": [
+        "module",
+        "segment_id",
+        "segment_key",
+        "source_digest",
+        "segment_revision_digest",
+        "context_bundle_digest",
+        "context_status",
+        "module_view_digest",
+        "context_projection_digest",
+        "entity_fact_ids",
+        "relation_ids",
+        "runtime_example_ids",
+        "term_evidence_ids",
+        "resolved_constraint_digests",
+        "neighbors",
+        "neighbor_selection_digest",
+        "runtime_example_selection_digest",
+        "selection_digest"
+      ],
+      "properties": {
+        "module": {"$ref": "#/$defs/nonempty"},
+        "segment_id": {"$ref": "#/$defs/segment_id"},
+        "segment_key": {"$ref": "#/$defs/nonempty"},
+        "source_digest": {"$ref": "#/$defs/sha256"},
+        "segment_revision_digest": {"$ref": "#/$defs/sha256"},
+        "context_bundle_digest": {"$ref": "#/$defs/sha256"},
+        "context_status": {
+          "enum": ["ready", "incomplete", "conflict", "disabled", "blocked", "protected", "unknown"]
+        },
+        "module_view_digest": {"$ref": "#/$defs/sha256"},
+        "context_projection_digest": {"$ref": "#/$defs/sha256"},
+        "entity_fact_ids": {"$ref": "#/$defs/string_set"},
+        "relation_ids": {"$ref": "#/$defs/string_set"},
+        "runtime_example_ids": {"$ref": "#/$defs/string_set"},
+        "term_evidence_ids": {"$ref": "#/$defs/string_set"},
+        "resolved_constraint_digests": {"$ref": "#/$defs/string_set"},
+        "neighbors": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/neighbor_receipt"}
+        },
+        "neighbor_selection_digest": {"$ref": "#/$defs/sha256"},
+        "runtime_example_selection_digest": {"$ref": "#/$defs/sha256"},
+        "selection_digest": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

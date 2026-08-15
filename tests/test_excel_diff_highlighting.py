@@ -762,6 +762,7 @@ class RichDiffReportTests(unittest.TestCase):
         original = "\n".join(f"Line {index} uses OLD." for index in range(31))
         suggested = "\n".join(f"Line {index} uses NEW." for index in range(31))
         state = {
+            "job_runtime_contract_version": 2,
             "input_path": str(job / "source.xlsx"),
             "headers": ["原文", "译文"],
             "rows_raw": [
@@ -843,6 +844,7 @@ class RichDiffReportTests(unittest.TestCase):
                 errors_path = job / "errors.json"
                 output = job / f"publish-{failure_target}_lqe.xlsx"
                 state = {
+                    "job_runtime_contract_version": 2,
                     "input_path": str(job / "source.xlsx"),
                     "headers": ["原文", "译文"],
                     "rows_raw": [
@@ -943,6 +945,7 @@ class RichDiffReportTests(unittest.TestCase):
         errors_path = job / "errors.json"
         output = job / "publish-success_lqe.xlsx"
         state = {
+            "job_runtime_contract_version": 2,
             "input_path": str(job / "source.xlsx"),
             "headers": ["原文", "译文"],
             "rows_raw": [["Protected source", "Protected target"]],
