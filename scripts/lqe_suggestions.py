@@ -34,6 +34,7 @@ from lqe_engine import (
 from lqe_paths import write_json_atomic
 from lqe_result_contract import result_contract_path, validate_result_contract
 from lqe_split_contract import canonical_digest
+from lqe_target_form import load_target_form_policy
 from lqe_context_bundle import (
     ContextBundleError,
     build_context_bundle,
@@ -1771,6 +1772,7 @@ def _verify_results(
         allow_internal_provenance=bound,
         require_internal_provenance=bound,
         review_policy=get_review_policy(state),
+        target_form_policy=load_target_form_policy(state),
     )
 
 
@@ -2683,12 +2685,14 @@ def _candidate_route(
     reference_target: object,
     source_semantics: dict,
     tone_decision: dict,
+    target_form_policy: dict | None = None,
 ) -> tuple[dict, dict | None]:
     try:
         validated = validate_reference_target(
             segment,
             reference_target,
             label=f"reference suggestion candidate {segment['id']}",
+            target_form_policy=target_form_policy,
         )
     except CheckFormatError:
         return ({
@@ -2756,6 +2760,7 @@ def _build_candidate_artifact_payload(
     segments: list[dict],
     *,
     generation_batches: list[dict] | None = None,
+    target_form_policy: dict | None = None,
 ) -> dict:
     segment_map = {segment["id"]: segment for segment in segments}
     packet_segments = {segment["id"]: segment for segment in packet["segments"]}
@@ -2781,6 +2786,7 @@ def _build_candidate_artifact_payload(
             draft_entry["reference_target"],
             draft_entry["source_semantics"],
             draft_entry["tone_decision"],
+            target_form_policy,
         )
         routes.append(route)
         if candidate is not None:
@@ -2840,7 +2846,12 @@ def _build_candidate_artifact_payload(
     )
     payload = _with_digest(payload, "artifact_digest")
     _validate_schema(payload, CANDIDATE_SCHEMA, CANDIDATE_VERSION)
-    validate_candidate_artifact(payload, packet, segments)
+    validate_candidate_artifact(
+        payload,
+        packet,
+        segments,
+        target_form_policy=target_form_policy,
+    )
     return payload
 
 
@@ -2848,6 +2859,8 @@ def build_candidate_artifact(
     packet: dict,
     draft: dict,
     segments: list[dict],
+    *,
+    target_form_policy: dict | None = None,
 ) -> dict:
     validate_generation_draft(draft, packet)
     return _build_candidate_artifact_payload(
@@ -2858,6 +2871,7 @@ def build_candidate_artifact(
         [copy.deepcopy(draft["worker_receipt"])],
         canonical_digest(draft),
         segments,
+        target_form_policy=target_form_policy,
     )
 
 
@@ -2866,6 +2880,8 @@ def build_candidate_artifact_from_batches(
     batches: list[dict],
     drafts: list[dict],
     segments: list[dict],
+    *,
+    target_form_policy: dict | None = None,
 ) -> dict:
     if len(batches) != len(drafts) or len(batches) < 2:
         raise ValueError("suggestion generation batch draft count is invalid")
@@ -2928,6 +2944,7 @@ def build_candidate_artifact_from_batches(
         canonical_digest([canonical_digest(draft) for draft in drafts]),
         segments,
         generation_batches=batch_evidence,
+        target_form_policy=target_form_policy,
     )
 
 
@@ -2935,6 +2952,8 @@ def validate_candidate_artifact(
     artifact: object,
     packet: dict,
     segments: list[dict],
+    *,
+    target_form_policy: dict | None = None,
 ) -> dict:
     _validate_schema(artifact, CANDIDATE_SCHEMA, CANDIDATE_VERSION)
     _validate_self_digest(artifact, "artifact_digest", "candidate artifact")
@@ -3075,6 +3094,7 @@ def validate_candidate_artifact(
             segment_map[entry["id"]],
             entry["reference_target"],
             label=f"candidate artifact id {entry['id']}",
+            target_form_policy=target_form_policy,
         )
         if route_map[entry["id"]].get("candidate_digest") != entry["candidate_digest"]:
             raise ValueError(f"candidate artifact id {entry['id']} route digest mismatch")
@@ -3084,6 +3104,7 @@ def validate_candidate_artifact(
             entry["reference_target"],
             entry["source_semantics"],
             entry["tone_decision"],
+            target_form_policy,
         )
         if expected_candidate != entry:
             raise ValueError(
@@ -3104,6 +3125,7 @@ def validate_suggestion_artifact(
     candidate_artifact: dict | None = None,
     review_artifact: dict | None = None,
     review_packet: dict | None = None,
+    target_form_policy: dict | None = None,
 ) -> dict[int, str]:
     _validate_schema(artifact, ARTIFACT_SCHEMA, ARTIFACT_VERSION)
     _validate_self_digest(artifact, "artifact_digest", "final suggestion artifact")
@@ -3196,6 +3218,7 @@ def validate_suggestion_artifact(
             segment_map[entry["id"]],
             entry["reference_target"],
             label=f"final suggestion artifact id {entry['id']}",
+            target_form_policy=target_form_policy,
         )
         if entry["candidate_digest"] != canonical_digest({
             key: copy.deepcopy(entry[key])
@@ -3396,7 +3419,13 @@ def load_reference_suggestions(
     if not candidate_path.is_file():
         raise ValueError("reference suggestion candidate artifact is missing")
     candidate = read_json(candidate_path)
-    validate_candidate_artifact(candidate, packet, segments)
+    target_form_policy = load_target_form_policy(state)
+    validate_candidate_artifact(
+        candidate,
+        packet,
+        segments,
+        target_form_policy=target_form_policy,
+    )
     review = None
     review_packet = None
     review_path = Path(job) / "suggestion_review.json"
@@ -3417,6 +3446,7 @@ def load_reference_suggestions(
         candidate_artifact=candidate,
         review_artifact=review,
         review_packet=review_packet,
+        target_form_policy=target_form_policy,
     )
 
 
@@ -3496,7 +3526,12 @@ def cmd_publish_candidates(args) -> None:
     if packet_plan["mode"] == "single":
         if draft is None:
             raise ValueError("single-batch suggestion draft must be a JSON file")
-        artifact = build_candidate_artifact(packet, draft, segments)
+        artifact = build_candidate_artifact(
+            packet,
+            draft,
+            segments,
+            target_form_policy=load_target_form_policy(state),
+        )
     else:
         if not input_path.is_dir():
             raise ValueError(
@@ -3515,6 +3550,7 @@ def cmd_publish_candidates(args) -> None:
             packet_plan["batches"],
             drafts,
             segments,
+            target_form_policy=load_target_form_policy(state),
         )
     output = Path(args.out) if args.out else job / CANDIDATE_NAME
     write_json_atomic(output, artifact)
@@ -3542,7 +3578,13 @@ def cmd_validate(args) -> None:
     require_persisted_packet_plan(job, packet_plan)
     packet = packet_plan["root_packet"]
     candidate = read_json(job / CANDIDATE_NAME)
-    validate_candidate_artifact(candidate, packet, segments)
+    target_form_policy = load_target_form_policy(state)
+    validate_candidate_artifact(
+        candidate,
+        packet,
+        segments,
+        target_form_policy=target_form_policy,
+    )
     review_path = job / "suggestion_review.json"
     review = read_json(review_path) if review_path.is_file() else None
     review_packet = None
@@ -3562,6 +3604,7 @@ def cmd_validate(args) -> None:
         candidate_artifact=candidate,
         review_artifact=review,
         review_packet=review_packet,
+        target_form_policy=target_form_policy,
     )
     print(f"[lqe_suggestions] Valid v5 final → {artifact_path} ({len(suggestions)} suggestion(s))")
 

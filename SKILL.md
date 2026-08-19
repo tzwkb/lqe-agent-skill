@@ -88,6 +88,11 @@ projects/<game>/<source>-<target>/
 
 项目规则顺序：实时要求 > `confirmed_rules.md` > 风格指南 > 通用检查方法。运行检查前必须读取项目背景、确认规则、风格指南和语言说明。
 
+分析人工审校表、计算“修改率”或把反馈回流到 Skill/Profile 时，先读
+[`references/feedback_learning.md`](references/feedback_learning.md)。审校终稿和空白
+Note 都不自动构成金标或通过结论；只有证据对列的客观纠错及经确认、带作用域的
+项目风格规则可以进入运行时约束。
+
 ## 2. 初始化
 
 ```bash
@@ -285,7 +290,7 @@ python "$SCRIPTS/lqe_io.py" pre-check \
 
 预检覆盖：未翻译内容、空译文、变量、标签、换行、数字、长度、空格、全角标点、句尾标点、中文数字与量词、重复词、词内大小写、成对标点、拼音残留、文件内一致性和项目自定义规则。标准模式还运行术语命中、术语大小写和依赖术语表的专名检查；无术语模式从源头跳过这些术语检查。
 
-`checks.json` 的 `builtin` 可关闭不适用项，`custom` 可增加 regex 或 `count_match` 检查。语言属性会自动关闭不适用于目标语言的检查。预检结果仍需按上下文复核。
+`checks.json` 的 `builtin` 可关闭不适用项，`custom` 可增加 regex 或 `count_match` 检查。语言属性会自动关闭不适用于目标语言的检查。项目可显式启用 `target_form_gate`，并按需打开 `forbidden_nbsp`、`ko_single_quote_balance`、`ko_particle_edit_boundary`；通用形式项同时约束局部修改和整句参考建议，助词边界项只约束可解析的局部 edit。此门只拒绝候选新引入的确定性形式错误，不因原译已有问题阻断无关修改。目标侧 custom regex 只有显式写 `"mutation_gate": true` 才参与该门。预检结果仍需按上下文复核。
 
 ## 6. 检查模块
 
@@ -354,6 +359,7 @@ references/suggestions.md
 - 新译名、术语表错误或缺词、多个合理方案、整句重写写 `needs_confirmation: true` 和 `edit: null`。
 - 术语或专名修改必须引用唯一的 `confirmed: true` 候选，证据格式为 `{"type":"confirmed_term","source":"...","target":"..."}`。
 - 变量、标签、换行、受保护文本和受保护段不得被修改。
+- Profile 启用 `target_form_gate` 时，局部 edit 在构建 `corrected` 前复用同一确定性检查；若新增首尾空白、NBSP、成对标点错误、已启用的项目禁用形式或可确定的韩语助词形态错误，则清除 edit 并转为待确认。它属于现有 correction builder 的入选门，不是新增后置 QA。
 
 模块分工：
 
@@ -499,7 +505,7 @@ python "$SCRIPTS/lqe_suggestion_review.py" publish-review \
 python "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
-参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段或约束冲突时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
+参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段、约束冲突，或候选新引入 Profile 已启用的确定性目标语形式错误时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
 
 建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。缺少说话人、受话人或关系字段本身不触发弃权：若源文已明确 speech act、强度或敌意，且候选无需选择未知关系、称谓、代词、礼貌等级或角色口吻即可忠实表达，应继续生成并引用源文证据；只有缺失信息会实质改变候选措辞时才弃权。正式候选的 `tone_decision.uncertainties` 必须为空：已通过中性措辞规避的缺口写进 evidence；仍会改变译文的未知信息必须转为 abstain，不能把带不确定性的候选交给后续发布。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
 

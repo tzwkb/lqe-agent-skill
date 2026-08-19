@@ -29,8 +29,16 @@ _TRUSTED_PROVIDER_SPECS = {
         "target_lang": "ko",
         "capability": "language.register",
         "module_path": _ROOT / "target_languages" / "ko" / "register.py",
-    }
+    },
+    "ko.register@2": {
+        "id": "ko.register",
+        "api_version": 2,
+        "target_lang": "ko",
+        "capability": "language.register",
+        "module_path": _ROOT / "target_languages" / "ko" / "register_v2.py",
+    },
 }
+_DEFAULT_PROVIDER_KEYS = {("ko", "language.register"): "ko.register@1"}
 _REQUIRED_PROVIDER_CALLS = ("validate_policy", "resolve", "observe", "evaluate")
 
 
@@ -116,6 +124,13 @@ def provider_for(target_lang: str, capability: str) -> dict | None:
     )
     if not matches:
         return None
+    default_key = _DEFAULT_PROVIDER_KEYS.get((target_lang, capability))
+    if default_key is not None:
+        if default_key not in matches:
+            raise LanguagePolicyError(
+                f"default provider is unavailable for {target_lang}/{capability}"
+            )
+        return deepcopy(matches[default_key])
     if len(matches) > 1:
         raise LanguagePolicyError(
             f"multiple trusted providers for {target_lang}/{capability}"

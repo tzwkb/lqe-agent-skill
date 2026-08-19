@@ -42,6 +42,7 @@ from lqe_suggestions import (
     validate_suggestion_artifact,
 )
 from lqe_split_contract import canonical_digest
+from lqe_target_form import load_target_form_policy
 
 
 REVIEW_PACKET_NAME = "suggestion_review.packet.json"
@@ -862,7 +863,12 @@ def _load_live_chain_plan(
     )
     require_persisted_packet_plan(job, generation_plan)
     generation_packet = generation_plan["root_packet"]
-    validate_candidate_artifact(candidate, generation_packet, segments)
+    validate_candidate_artifact(
+        candidate,
+        generation_packet,
+        segments,
+        target_form_policy=load_target_form_policy(state),
+    )
     review_plan = _build_review_packet_plan(job, generation_plan, candidate)
     return (
         state,
@@ -966,7 +972,7 @@ def cmd_publish_review(args) -> None:
 def cmd_publish_final(args) -> None:
     job = Path(args.job).resolve()
     (
-        _,
+        state,
         segments,
         generation_packet,
         candidate,
@@ -994,6 +1000,7 @@ def cmd_publish_final(args) -> None:
         candidate_artifact=candidate,
         review_artifact=review,
         review_packet=review_packet,
+        target_form_policy=load_target_form_policy(state),
     )
     output = Path(args.out) if args.out else job / ARTIFACT_NAME
     write_json_atomic(output, artifact)

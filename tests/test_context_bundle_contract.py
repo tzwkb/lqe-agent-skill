@@ -878,6 +878,38 @@ class ContextBundleSelectionTests(ContextBundleFixture):
             "entity.operator",
         )
 
+    def test_style_dimensions_reach_naturalness_and_suggestions_when_inconclusive(self):
+        segment = deepcopy(self.current)
+        constraint = segment["resolved_constraints"][0]
+        constraint["expected"] = {
+            "person": ["second"],
+            "tense": ["past"],
+            "politeness": ["formal_polite"],
+            "ending_families": ["hapsyo"],
+        }
+        constraint["runtime_evaluation"] = {
+            "status": "inconclusive",
+            "reason_codes": ["person_not_observed"],
+            "observation": {
+                "status": "observed",
+                "person": None,
+                "tense": "past",
+            },
+        }
+        view = deepcopy(self.view)
+        view["capabilities"].append("language_policy.register@1")
+        view["dimensions"] = ["naturalness", "tone"]
+
+        for module in ("naturalness", "suggestions"):
+            with self.subTest(module=module):
+                bundle = build_context_bundle(
+                    self.state,
+                    segment,
+                    module,
+                    module_view=view,
+                )
+                self.assertEqual(bundle["resolved_constraints"], [constraint])
+
     def test_relation_runtime_rule_false_is_never_worker_visible(self):
         baseline = build_context_bundle(
             self.state, self.current, "accuracy", module_view=self.view

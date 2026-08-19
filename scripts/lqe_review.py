@@ -39,6 +39,7 @@ from lqe_paths import (
     write_json_atomic,
 )
 from lqe_split_contract import canonical_digest, generation_lock, publish_generation
+from lqe_target_form import load_target_form_policy
 from lqe_context_bundle import (
     ContextBundleError,
     WorkerContextBudgetError,
@@ -1161,6 +1162,7 @@ def _publish_full_entries(
                     segment_by_id[entry["id"]],
                     entry["issues"],
                     review_policy=get_review_policy(state),
+                    target_form_policy=load_target_form_policy(state),
                 )
             except CheckFormatError as exc:
                 raise SystemExit(

@@ -25,6 +25,10 @@ from lqe_paths import (
     validate_artifact_paths,
     write_json_atomic,
 )
+from lqe_target_form import (
+    checks_path_for_state,
+    korean_single_quote_count,
+)
 
 _RE_DASH     = re.compile(r'—')
 _RE_NUM      = re.compile(r'(?<!\d)(\d{4,})(?!\d)')
@@ -187,7 +191,7 @@ def _load_checks(state: dict, lang_attrs: dict):
         toggles.update(derived)
         print(f"[pre-check] language attrs derived: {derived}")
 
-    p = state.get("checks_path", "")
+    p = checks_path_for_state(state)
     if p and Path(p).exists():
         _absorb(read_json(p), "project checks.json")  # 项目层后合并，覆盖语言层同名开关
         print(f"[pre-check] checks profile: {len(toggles)} toggles, {len(custom)} custom rules")
@@ -326,6 +330,7 @@ def run_pre_check(state_path: Path, out_path: Path | None = None):
     if not terminology_enabled(state):
         toggles.update({"terminology": False, "term_case": False})
     on = lambda key: toggles.get(key, True)
+    opt_in = lambda key: toggles.get(key, False) is True
 
     numerals = lang_attrs.get("numerals", [])
     target_terminal = lang_attrs.get("sentence_terminator") or _TGT_TERMINAL
@@ -514,12 +519,33 @@ def run_pre_check(state_path: Path, out_path: Path | None = None):
                 "severity": "Minor",
                 "comment": "Leading/trailing whitespace in target",
             })
+        nbsp_runs = []
+        if opt_in("forbidden_nbsp"):
+            for match in re.finditer("[ \t\u00a0\u202f]+", tgt):
+                if "\u00a0" not in match.group(0) and "\u202f" not in match.group(0):
+                    continue
+                nbsp_runs.append((match.start(), match.end()))
+                replacement = (
+                    ""
+                    if match.start() == 0 or match.end() == len(tgt)
+                    else " "
+                )
+                errs.append({
+                    "category": "Punctuation",
+                    "severity": "Minor",
+                    "comment": "Forbidden non-breaking space in target",
+                    "edit": _local_edit(
+                        match.group(0), replacement, match.start(), match.end()
+                    ),
+                })
         for match in (
             re.finditer(r"(?<=\S) {2,}(?=\S)", tgt)
             if on("whitespace")
             else ()
         ):
             start, end = match.start(), match.end()
+            if any(start < run_end and run_start < end for run_start, run_end in nbsp_runs):
+                continue
             errs.append({
                 "category": "Punctuation",
                 "severity": "Minor",
@@ -592,6 +618,15 @@ def run_pre_check(state_path: Path, out_path: Path | None = None):
             if src.count('"') % 2 == 0 and tgt.count('"') % 2 == 1:
                 errs.append({"category": "Punctuation", "severity": "Minor",
                              "comment": "Odd number of straight double quotes in target"})
+        if (
+            opt_in("ko_single_quote_balance")
+            and korean_single_quote_count(tgt) % 2
+        ):
+            errs.append({
+                "category": "Punctuation",
+                "severity": "Minor",
+                "comment": "Odd number of Korean straight single quotes in target",
+            })
 
         # #3: 通用标签模式集源译对账（项目特殊格式另用 custom count_match 精配）
         if on("tag_count"):

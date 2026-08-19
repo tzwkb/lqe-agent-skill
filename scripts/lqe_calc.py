@@ -19,6 +19,7 @@ from lqe_result_contract import (
     result_contract_path,
     validate_result_contract,
 )
+from lqe_target_form import load_target_form_policy
 from lqe_scoring import (
     resolve_scoring_policy,
     score_errors,
@@ -147,6 +148,7 @@ def main():
                 allow_internal_provenance=True,
                 require_internal_provenance=True,
                 review_policy=get_review_policy(state),
+                target_form_policy=load_target_form_policy(state),
             )
             policy = resolve_scoring_policy(
                 state,

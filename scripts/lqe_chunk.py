@@ -45,6 +45,7 @@ from lqe_paths import (
     write_json_atomic,
 )
 from lqe_result_contract import build_result_contract, result_contract_path
+from lqe_target_form import load_target_form_policy
 from lqe_split_contract import (
     SplitContractError,
     add_chunk_payload_digest,
@@ -1071,6 +1072,7 @@ def _cmd_merge_unlocked(a, state: dict, outdir: Path):
                 allow_internal_provenance=bound_results,
                 require_internal_provenance=bound_results,
                 review_policy=get_review_policy(state),
+                target_form_policy=load_target_form_policy(state),
             )
         )
 

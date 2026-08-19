@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from lqe_corrections import CheckFormatError, build_results, normalize_check_entries
+from lqe_target_form import load_target_form_policy
 from lqe_engine import (
     RE_CJK as _RE_CJK,
     current_target,
@@ -275,6 +276,7 @@ def _cmd_merge_locked(args, job: Path, state: dict):
         state["segments"],
         list(merged.values()),
         review_policy=review_policy,
+        target_form_policy=load_target_form_policy(state),
     )
     (job / "errors.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
 

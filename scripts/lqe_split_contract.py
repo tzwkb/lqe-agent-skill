@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - POSIX fallback
     msvcrt = None
 
 from lqe_engine import current_target, get_review_policy
+from lqe_project_assets import validate_project_asset_snapshot
 
 
 CONTRACT_VERSION = 1
@@ -158,12 +159,78 @@ def _asset_snapshot(raw_path: object, field: str) -> dict:
     return snapshot
 
 
+def _revision_asset_snapshot(state: dict, field: str) -> dict:
+    raw_path = state.get(field)
+    has_v2_asset_contract = any(
+        key in state
+        for key in (
+            "project_asset_snapshot",
+            "project_asset_snapshot_digest",
+            "project_asset_paths",
+        )
+    )
+    if (
+        state.get("job_runtime_contract_version") != 2
+        or field != "checks_path"
+        or not has_v2_asset_contract
+    ):
+        return _asset_snapshot(raw_path, field)
+    if not isinstance(raw_path, str):
+        raise SplitContractError(f"state.{field} must be a string")
+
+    try:
+        snapshot = validate_project_asset_snapshot(
+            state.get("project_asset_snapshot")
+        )
+    except ValueError as exc:
+        raise SplitContractError(str(exc)) from exc
+    if state.get("project_asset_snapshot_digest") != snapshot["digest"]:
+        raise SplitContractError("v2 project asset snapshot digest is stale")
+    assets = snapshot["assets"]
+    present = [
+        entry
+        for entry in (assets.values() if isinstance(assets, dict) else [])
+        if isinstance(entry, dict)
+        and entry.get("kind") == "checks"
+        and entry.get("status") == "present"
+    ]
+    if not raw_path.strip():
+        if present:
+            raise SplitContractError(
+                "v2 state has a present checks asset but no live checks path"
+            )
+        return {"path": raw_path, "status": "unconfigured"}
+    if len(present) != 1:
+        raise SplitContractError(
+            "v2 state must bind exactly one present checks asset"
+        )
+    digest = present[0].get("sha256")
+    if not isinstance(digest, str) or not digest:
+        raise SplitContractError("v2 checks asset digest is missing")
+    return {"path": raw_path, "status": "file", "sha256": digest}
+
+
 def state_revision_payload(state: dict) -> dict:
     if not isinstance(state, dict):
         raise SplitContractError("state must be an object")
     segments = state.get("segments")
     if not isinstance(segments, list):
         raise SplitContractError("state.segments must be an array")
+    asset_fields = (
+        "terms_path",
+        "sg_path",
+        "checks_path",
+        "confirmed_rules_path",
+        "lang_notes_path",
+        "background_path",
+        "capability_resolution_path",
+        "project_asset_snapshot_path",
+        "tabular_source_manifest_path",
+        "source_manifest_path",
+        "project_source_manifest_path",
+        "context_overrides_path",
+        "context_gap_report_path",
+    )
     return {
         "artifact_contract_version": state.get("artifact_contract_version"),
         "job_runtime_contract_version": state.get("job_runtime_contract_version"),
@@ -201,22 +268,8 @@ def state_revision_payload(state: dict) -> dict:
             state.get("module_context_views", {})
         ),
         "asset_paths": {
-            key: _asset_snapshot(state.get(key), key)
-            for key in (
-                "terms_path",
-                "sg_path",
-                "checks_path",
-                "confirmed_rules_path",
-                "lang_notes_path",
-                "background_path",
-                "capability_resolution_path",
-                "project_asset_snapshot_path",
-                "tabular_source_manifest_path",
-                "source_manifest_path",
-                "project_source_manifest_path",
-                "context_overrides_path",
-                "context_gap_report_path",
-            )
+            key: _revision_asset_snapshot(state, key)
+            for key in asset_fields
             if state.get(key) is not None
         },
         "segments": [_state_segment_payload(segment) for segment in segments],
