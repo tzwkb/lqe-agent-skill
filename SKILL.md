@@ -28,7 +28,7 @@ SCRIPTS=~/.codex/skills/lqe-translator/scripts
 - 降本模式：Minor 只报告问题；comment 以 20–30 字符为软目标；完整参考建议默认只纳入 Major/Critical 候选；有上游文本分类时按分类矩阵调整重点。
 - 完整模式：恢复降本改造前的行为；所有严重度都由 Agent 判断是否能给安全局部修改或完整参考建议；comment 无 20–30 字符目标；文本分类只作上下文，不改变检查强度或建议口径。
 
-不得根据项目、文件、历史任务或成本偏好代替用户选择。用户已在当前请求中明确选择时不重复询问；继续已有 job 时读取 `state.review_policy`，不再询问。一个 job 内不得中途切换；需要换模式时重新执行 `read` 并重建后续 artifact。
+不得根据项目、文件、历史任务或成本偏好代替用户选择。用户已在当前请求中明确选择时不重复询问。只有在**同一目录原地继续同一个 job**，且其 runtime、路径、policy 和现有 generation 都仍可用时，才读取 `state.review_policy` 而不再询问。只要因为路径失效、runtime 升级、policy 变化或合同不兼容而需要 `read`/`reread` 创建另一个 job，就按新 job 处理：`--review-mode` 只能来自用户在当前请求中的明确选择；当前请求未明确时必须先询问并等待，绝不能继承历史 job 的 mode。历史 `state.review_policy` 只用于审计，不构成用户对新 job 的授权。一个 job 内不得中途切换；需要换模式时重新执行 `read` 并重建后续 artifact。
 
 优先使用 `read --project <game>/<source>-<target>`。用户只给游戏名时，列出该游戏已有语言轨；没有目标语言轨时，先建立 profile，不回退到另一套临时入口。
 
@@ -87,6 +87,11 @@ projects/<game>/<source>-<target>/
 目标语言事实放在 `target_languages/<code>/attributes.json`，语言级检查说明放在 `eval_notes.md`。合并顺序为：内置默认 < 语言属性 < 项目 `checks.json` < CLI 参数。
 
 项目规则顺序：实时要求 > `confirmed_rules.md` > 风格指南 > 通用检查方法。运行检查前必须读取项目背景、确认规则、风格指南和语言说明。
+
+分析人工审校表、计算“修改率”或把反馈回流到 Skill/Profile 时，先读
+[`references/feedback_learning.md`](references/feedback_learning.md)。审校终稿和空白
+Note 都不自动构成金标或通过结论；只有证据对列的客观纠错及经确认、带作用域的
+项目风格规则可以进入运行时约束。
 
 ## 2. 初始化
 
@@ -285,11 +290,15 @@ python "$SCRIPTS/lqe_io.py" pre-check \
 
 预检覆盖：未翻译内容、空译文、变量、标签、换行、数字、长度、空格、全角标点、句尾标点、中文数字与量词、重复词、词内大小写、成对标点、拼音残留、文件内一致性和项目自定义规则。标准模式还运行术语命中、术语大小写和依赖术语表的专名检查；无术语模式从源头跳过这些术语检查。
 
-`checks.json` 的 `builtin` 可关闭不适用项，`custom` 可增加 regex 或 `count_match` 检查。语言属性会自动关闭不适用于目标语言的检查。预检结果仍需按上下文复核。
+`checks.json` 的 `builtin` 可关闭不适用项，`custom` 可增加 regex 或 `count_match` 检查。语言属性会自动关闭不适用于目标语言的检查。项目可显式启用 `target_form_gate`，并按需打开 `forbidden_nbsp`、`ko_single_quote_balance`、`ko_particle_edit_boundary`；通用形式项同时约束局部修改和整句参考建议，助词边界项只约束可解析的局部 edit。此门只拒绝候选新引入的确定性形式错误，不因原译已有问题阻断无关修改。目标侧 custom regex 只有显式写 `"mutation_gate": true` 才参与该门。预检结果仍需按上下文复核。
 
 ## 6. 检查模块
 
-大文件和小文件都按模块并行检查，并按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 最多处理 4 个 packet，同时不得超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。不可再拆的最小单元仍超限时失败，不截断。模块说明位于：
+大文件和小文件都按模块并行检查，并按 `review_packets/batch_plan.json` 分配有界 worker。每个 checker worker 最多处理 4 个 packet，同时不得超过 25,000 原译字符；完整 worker input **不设置字节硬上限**，也不得仅因输入字节数自动拒绝、截断或丢弃资料。模块说明位于：
+
+runtime 仍必须完整计量单个 worker 批次实际需要读取的全部输入：`common.md` 与模块 instructions、当前批次 packet、`worker_manifest.json`、`bundle_set.json`、背景、风格指南、确认规则、语言说明、共享资产及其索引、canonical compact projection，以及 manifest 列出的其他正文资料。manifest 的 `budget.measured_bytes` 是组件基线；包含 manifest/bundle 外壳和实际 packet 的完整批次值写入 checker batch plan/cost report 或 suggestion `input_measurement.json`。输出草稿和已完成的审校判断不计入本次输入计量。新 manifest 固定写 `budget.max_bytes: null`、`budget.status: "advisory"`，字节数及组件分解只作运行时决策证据，不构成程序阈值。
+
+每次运行都由主 Agent在派发前完成本轮输入判断：checker 读取 `review_packets/batch_plan.json`、`review_packets/cost_report.json` 和对应批次的 `worker_manifest.json`；suggestion generation 读取 `suggestion_context/input_measurement.json`、存在时的 batch plan 和各批 worker manifest；suggestion verifier 读取 `suggestion_review_context/input_measurement.json`、存在时的 review batch plan，以及 packet 引用的 generation worker manifest。主 Agent结合当次模型、可用上下文、组件分解、资料密度和任务风险，自行决定直接继续还是调整批次/分块。不得沿用历史固定阈值代替本轮判断；输入较大本身不表示句段、旧 packet、旧 draft 或历史人工成本失效。
 
 流程要求 subagent 并行检查时，如果因并发上限、权限、工具不可用或运行环境限制而无法启用，**必须主动询问用户**如何处理；**不得静默回退**为主 Agent 单跑、跳过模块、缩小覆盖范围或降低检查标准。用户明确同意替代方案后才能继续。
 
@@ -354,6 +363,7 @@ references/suggestions.md
 - 新译名、术语表错误或缺词、多个合理方案、整句重写写 `needs_confirmation: true` 和 `edit: null`。
 - 术语或专名修改必须引用唯一的 `confirmed: true` 候选，证据格式为 `{"type":"confirmed_term","source":"...","target":"..."}`。
 - 变量、标签、换行、受保护文本和受保护段不得被修改。
+- Profile 启用 `target_form_gate` 时，局部 edit 在构建 `corrected` 前复用同一确定性检查；若新增首尾空白、NBSP、成对标点错误、已启用的项目禁用形式或可确定的韩语助词形态错误，则清除 edit 并转为待确认。它属于现有 correction builder 的入选门，不是新增后置 QA。
 
 模块分工：
 
@@ -393,7 +403,9 @@ python "$SCRIPTS/lqe_chunk.py" split \
 
 `split` 会从 state 读取当前模式允许的术语，按相同源文和译文去重、过滤被更长术语覆盖的命中、保留术语候选标记，并为每段写 `kind`。标准模式可用 `--terms <file>` 显式覆盖术语源；无术语模式禁止该参数。密集内容可加 `--char-budget N`。
 
-未显式传 `--size` 时，`context_pipeline.mode=enforce` 默认每块最多 5 段，`off`/`shadow` 保持 100 段；显式 `--size` 始终优先。该默认值为富上下文预留 worker 输入预算，`prepare` 仍按 100,000 字节硬上限校验；单段仍超限时失败，不截断资料。
+未显式传 `--size` 时，`context_pipeline.mode=enforce` 默认每块最多 5 段，`off`/`shadow` 保持 100 段；显式 `--size` 始终优先。该默认值用于控制富上下文任务的单批资料密度；`prepare` 只完整计量输入字节，不按字节数拒绝单段或截断资料。
+
+恢复任务禁止未经用户授权反复改变 `--size`、`--char-budget` 或上下文策略来追求更小的字节计量。先读取历史与当前的 split manifest、`batch_plan.json`、`cost_report.json` 和 worker manifest，由主 Agent作出一次明确的本轮输入判断；已有可运行 size/manifest 时优先复用。确实必须改变分块策略时，先说明原因、拟用参数、会失效的技术绑定以及历史审校内容的迁移方案，并等待用户授权；不得用多轮 split/prepare 试跑代替说明。
 
 默认紧接着生成低成本模块输入，并自动发布无需 AI 的确定性空结果：
 
@@ -404,7 +416,7 @@ python "$SCRIPTS/lqe_review.py" auto-publish --job "$JOB"
 
 `prepare` 在 `review_packets/<module>/` 生成与当前 split generation 绑定的模块专用 packet，并写出 `batch_plan.json`、`cost_report.json` 和 `selected_evidence_index.json`。该索引逐模块、逐句段记录 checker 实际选中的人物事实、关系、示例、约束和相邻句证据；后续建议阶段只能取这些实际选择的严格并集。非术语模块不携带术语和预检冗余；受保护段不进入任何 packet；`precheck_review` 只携带其负责类别的已有预检。正式 chunk 保持不变。packet 的 `requires_ai: false` 只能来自这些确定性空结果，`auto-publish` 不处理仍需判断的 packet。
 
-当前 v2 job 还会为每个批次生成 `review_packets/context/<module>/batch_NN/bundle_set.json` 与 `worker_manifest.json`。worker 必须同时读取本批 packet、context bundle set、共享资料索引和 manifest 中列出的 SG/背景/确认规则/语言说明；每份可读资料必须使用可安全解析的 `job_relative`、`skill_relative` 或 `embedded_text` locator，并核对摘要、字节数及 100,000 字节总预算。checker 不交付 `references/suggestions.md`，其 `instructions.suggestions` 为 `null`；该文件只交付给 `module=suggestions`。完整 project source manifest 由 runtime 实时校验和绑定，checker 只接收已计入预算的 canonical compact projection，不读取审计 manifest 全文。只有 profile 已声明、能力协商已启用且摘要一致的资料可见。资料缺失、过期、越权、locator 不安全、超过字节预算或不能完整投影时失败，不截断后继续。
+当前 v2 job 还会为每个批次生成 `review_packets/context/<module>/batch_NN/bundle_set.json` 与 `worker_manifest.json`。worker 必须同时读取本批 packet、context bundle set、共享资料索引和 manifest 中列出的 SG/背景/确认规则/语言说明；每份可读资料必须使用可安全解析的 `job_relative`、`skill_relative` 或 `embedded_text` locator，并核对摘要和字节计量。checker 不交付 `references/suggestions.md`，其 `instructions.suggestions` 为 `null`；该文件只交付给 `module=suggestions`。完整 project source manifest 由 runtime 实时校验和绑定，checker 只接收已计量的 canonical compact projection，不读取审计 manifest 全文。只有 profile 已声明、能力协商已启用且摘要一致的资料可见。资料缺失、过期、越权、locator 不安全或不能完整投影时失败；输入字节较大只交由主 Agent判断，不触发自动截断或拒绝。
 
 必需输出由 `state.check_scope` 决定：
 
@@ -488,7 +500,8 @@ python "$SCRIPTS/lqe_chunk.py" merge \
 ```bash
 python "$SCRIPTS/lqe_suggestions.py" prepare --job "$JOB" \
   [--categories "Company style,Unidiomatic"] \
-  [--severities "Major,Critical"] [--only-missing]
+  [--severities "Major,Critical"] [--only-missing] \
+  [--worker-batch-size N]
 # suggestion worker 按 references/suggestions.md 生成 generation draft
 python "$SCRIPTS/lqe_suggestions.py" publish-candidates \
   --job "$JOB" --input <reference_suggestions.draft.json>
@@ -499,9 +512,11 @@ python "$SCRIPTS/lqe_suggestion_review.py" publish-review \
 python "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
-参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段或约束冲突时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
+参考建议允许整句改写。`optimized` 默认候选严重度为 Major/Critical，`full` 默认纳入全部严重度。术语审查留下未解决结论、输入 blocked、保护段、约束冲突，或候选新引入 Profile 已启用的确定性目标语形式错误时，程序直接拒绝候选；生成 worker 无权绕过。其余候选按风险进入确定性接收或独立 verifier，只有被接收的候选才能进入 v5 `reference_suggestions.json`。正式建议只供报告展示，不写入 corrected/export。任何 candidate、review 或 final 摘要过期都会 fail closed。
 
-建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。缺少说话人、受话人或关系字段本身不触发弃权：若源文已明确 speech act、强度或敌意，且候选无需选择未知关系、称谓、代词、礼貌等级或角色口吻即可忠实表达，应继续生成并引用源文证据；只有缺失信息会实质改变候选措辞时才弃权。正式候选的 `tone_decision.uncertainties` 必须为空：已通过中性措辞规避的缺口写进 evidence；仍会改变译文的未知信息必须转为 abstain，不能把带不确定性的候选交给后续发布。`suggestion_context/` 保存同一批建议的资料包与 worker manifest，独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
+建议生成以源文为唯一语义依据，从源文重新建立完整命题；原译只用于保留变量、标签、换行、受保护文本和已验证局部修改。生成后再核对错译、漏译、增译和已解析约束。缺少说话人、受话人或关系字段本身不触发弃权：若源文已明确 speech act、强度或敌意，且候选无需选择未知关系、称谓、代词、礼貌等级或角色口吻即可忠实表达，应继续生成并引用源文证据；只有缺失信息会实质改变候选措辞时才弃权。正式候选的 `tone_decision.uncertainties` 必须为空：已通过中性措辞规避的缺口写进 evidence；仍会改变译文的未知信息必须转为 abstain，不能把带不确定性的候选交给后续发布。
+
+`suggestion_context/` 保存建议资料包、worker manifest 和 advisory `input_measurement.json`。不传 `--worker-batch-size` 时 generation 默认单批；主 Agent读取实测后，可按本轮判断重新 `prepare --worker-batch-size N`，显式按候选数分批。verifier 沿用 generation 批次边界并写自己的实测文件，不按 bytes 自动拆批或拒绝。独立 verifier 读取相同资料证据，但不能修改候选文本，只能接受或拒绝。
 
 一键收尾：
 
@@ -509,7 +524,7 @@ python "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 bash "$SCRIPTS/finalize_job.sh" "$JOB" <nchunks> [single|iterate]
 ```
 
-`single` 只生成本轮报告和已验证局部建议；已有 `reference_suggestions.json` 时同时显示报告专用参考译文。`iterate` 在未达标时仅应用脚本重新验证通过的局部 edit。用户未明确选择时使用 `single`。状态机：PASS 才创建 `.finalized`；FAIL+single 不改当前译文且不完成；FAIL+iterate 只有至少应用一处安全局部修改时，才更新 `current_target`、`iteration + 1`、设置 `pending_recheck=true` 并返回 `PENDING-RECHECK`。如果没有可应用修改，则写出本轮报告，并通过 `export --errors` 写出已验证的错误覆盖，返回 `REVIEW-REQUIRED`，清除 `.iteration_pending`，不推进 iteration。下一轮必须重新预检、分块和检查；state/译文/scope/预检/术语指纹变化时旧 chunks 会归档，旧模块输出不可复用。
+`single` 只生成本轮报告和已验证局部建议；已有 `reference_suggestions.json` 时同时显示报告专用参考译文。`iterate` 在未达标时仅应用脚本重新验证通过的局部 edit。用户未明确选择时使用 `single`。状态机：PASS 才创建 `.finalized`；FAIL+single 不改当前译文且不完成；FAIL+iterate 只有至少应用一处安全局部修改时，才更新 `current_target`、`iteration + 1`、设置 `pending_recheck=true` 并返回 `PENDING-RECHECK`。如果没有可应用修改，则写出本轮报告，并通过 `export --errors` 写出已验证的错误覆盖，返回 `REVIEW-REQUIRED`，清除 `.iteration_pending`，不推进 iteration。下一轮必须重新预检、分块和检查；state/译文/scope/预检/术语指纹变化时旧 chunks 会归档，旧模块正式产物不得直接当作当前 generation 的产物发布，但其中的审校内容仍按第 11 节恢复合同审计和迁移。
 
 ## 8. 评分
 
@@ -626,9 +641,10 @@ jobs/<文件名>/
 ├── review_packets/
 │   ├── selected_evidence_index.json
 │   └── context/<module>/batch_NN/{bundle_set.json,worker_manifest.json}
-├── suggestion_context/{bundle_set.json,worker_manifest.json}
+├── suggestion_context/{input_measurement.json,bundle_set.json,worker_manifest.json,batches/}
 ├── reference_suggestions.packet.json
 ├── reference_suggestions.candidates.json
+├── suggestion_review_context/{input_measurement.json,batch_plan.json,batch_NN/}
 ├── suggestion_review.packet.json
 ├── suggestion_review.json
 ├── reference_suggestions.json
@@ -638,7 +654,20 @@ jobs/<文件名>/
 
 不要修改用户原始 Excel，也不要改写历史 `outputs`。任务产物只写入对应 job 目录。
 
-缺少 `job_runtime_contract_version: 2` 的历史 job 只能查看或验证现有产物，不得继续重新分块、审校、计分、写报告或导出。需要续跑时使用 `lqe_io.py reread --from-job <旧任务> --input <原输入> --job <新任务>`；程序先核对输入摘要、列/格式和逐段覆盖，再原子建立 v2 job，旧任务保持不变。
+### 11.1 续跑、恢复与历史审校复用合同
+
+续跑前先判定路径，不得把两类操作混为一谈：
+
+- **existing job 原地继续**：同一 job 目录的 `job_runtime_contract_version` 可运行，输入与资源 locator 可解析，用户当前要求与 `state.review_policy`/`check_scope` 一致，且当前 generation 的绑定仍有效。此时不执行 fresh `read`，不重分块；从第一个缺失或失败的原生阶段继续。
+- **fresh read 到新 job**：路径失效、runtime 合同升级、policy/scope 改变，或当前 generation 无法合法继续时，新建 job 并保留历史目录不动。新 job 的 review mode 必须使用用户在当前请求中的明确选择；未明确就先询问，禁止从旧 state、旧报告或旧命令继承。
+
+在生成新的审校工作前，必须先对历史 packet、draft、正式 module 文件和 receipt 建立复用清单。审计至少核对：原输入 SHA-256、逐段 `segment_key`/`source`/`target`、所属 module，以及当前 issue contract（类别权限、严重度、必填字段、术语 span/evidence 等）。清单把内容分为“可迁移”“需重新绑定并复核”“缺失”“损坏或无法验证”：可迁移内容不重做，需重新绑定者只做当前合同与上下文的必要复核，只补缺失、损坏或无法验证的部分。
+
+`packet_digest`、batch id、generation、绝对路径和 publication receipt 是技术绑定。它们过期会阻止旧 packet/draft **原样 publish**，但 stale digest 不等于审校内容无效。输入和句段身份一致、module 一致且问题内容满足当前 issue contract 时，应把历史判断迁移到当前 packet，对当前上下文做必要复核，重新生成合法绑定和真实 worker receipt；只补缺失、串 chunk、损坏、合同不兼容或无法验证的句段。不得伪造 receipt，也不得为了迁移而修改历史目录。
+
+历史批次曾超过旧版数值字节预算，只说明旧封装触发过当时的技术阈值；在当前 measured-only 合同下不再构成不合规。应把同一批已审校内容映射到当前 manifest/packet 并重新绑定，不得因此整批重做。任何会扩大重审范围、增加模式成本或改变分块策略的决定，都必须先向用户说明影响并取得授权。
+
+缺少 `job_runtime_contract_version: 2` 的历史 job 只能查看或验证其现有产物，不得在原目录继续重新分块、审校、计分、写报告或导出。需要续跑时，新建 v2 job；可使用 `lqe_io.py reread --from-job <旧任务> --input <原输入> --job <新任务>`，也可按当前 profile fresh `read`。无论使用哪个入口，都必须遵守上面的当前请求 mode 选择和历史内容复用审计；程序先核对输入摘要、列/格式和逐段覆盖，再原子建立新 job，旧任务保持不变。
 
 ## 12. 验证
 

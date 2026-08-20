@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import copy
 import re
+from collections import Counter
 
 from lqe_engine import current_target, get_review_policy
+from lqe_target_form import (
+    introduced_edit_boundary_particle_defects,
+    introduced_target_form_defects,
+)
 
 
 class CheckFormatError(ValueError):
@@ -696,6 +701,166 @@ def _damages_protected_text(segment: dict, original: str, resolved: dict) -> boo
     )
 
 
+def _downgrade_edit(error: dict, reason_codes: list[str] | None = None) -> None:
+    error["needs_confirmation"] = True
+    error["edit"] = None
+    if error.get("resolution_status") == "resolved":
+        error.pop("resolution_status", None)
+    if reason_codes:
+        existing = error.get("reason_codes", [])
+        error["reason_codes"] = list(dict.fromkeys([*existing, *reason_codes]))
+    if "review_provenance" in error:
+        error["review_provenance"]["edit_origin"] = None
+
+
+def _edit_key(resolved: dict) -> tuple:
+    return tuple(resolved[field] for field in ("start", "end", "from", "to"))
+
+
+def _apply_edit_groups(original: str, groups: dict[tuple, dict]) -> str:
+    corrected = original
+    for group in sorted(
+        groups.values(),
+        key=lambda value: value["resolved"]["start"],
+        reverse=True,
+    ):
+        resolved = group["resolved"]
+        corrected = (
+            corrected[: resolved["start"]]
+            + resolved["to"]
+            + corrected[resolved["end"] :]
+        )
+    return corrected
+
+
+def _adjacent_edit_clusters(groups: dict[tuple, dict]) -> list[list[tuple]]:
+    ordered = sorted(
+        groups,
+        key=lambda key: (groups[key]["resolved"]["start"], key),
+    )
+    clusters: list[list[tuple]] = []
+    cluster_end = None
+    for key in ordered:
+        resolved = groups[key]["resolved"]
+        if clusters and resolved["start"] == cluster_end:
+            clusters[-1].append(key)
+        else:
+            clusters.append([key])
+        cluster_end = resolved["end"]
+    return clusters
+
+
+def _cluster_particle_defects(
+    original: str,
+    groups: dict[tuple, dict],
+    keys: list[tuple],
+    target_form_policy: dict | None,
+) -> list[str]:
+    if target_form_policy is None:
+        return []
+    resolved_items = [groups[key]["resolved"] for key in keys]
+    start = min(item["start"] for item in resolved_items)
+    end = max(item["end"] for item in resolved_items)
+    replacement = original[start:end]
+    for resolved in sorted(
+        resolved_items,
+        key=lambda item: item["start"],
+        reverse=True,
+    ):
+        relative_start = resolved["start"] - start
+        relative_end = resolved["end"] - start
+        replacement = (
+            replacement[:relative_start]
+            + resolved["to"]
+            + replacement[relative_end:]
+        )
+    return introduced_edit_boundary_particle_defects(
+        original,
+        {
+            "start": start,
+            "end": end,
+            "from": original[start:end],
+            "to": replacement,
+        },
+        target_form_policy,
+    )
+
+
+def _gate_combined_edits(
+    original: str,
+    errors: list[dict],
+    resolved_by_index: dict[int, dict],
+    conflicts: set[int],
+    target_form_policy: dict | None,
+) -> tuple[dict[tuple, dict], str]:
+    groups: dict[tuple, dict] = {}
+    for index, resolved in resolved_by_index.items():
+        if index in conflicts or errors[index]["edit"] is None:
+            continue
+        key = _edit_key(resolved)
+        group = groups.setdefault(
+            key,
+            {"resolved": resolved, "indices": []},
+        )
+        group["indices"].append(index)
+
+    while groups and target_form_policy is not None:
+        rejected_particle_cluster = False
+        for keys in _adjacent_edit_clusters(groups):
+            defects = _cluster_particle_defects(
+                original,
+                groups,
+                keys,
+                target_form_policy,
+            )
+            if not defects:
+                continue
+            rejected_particle_cluster = True
+            for key in keys:
+                group = groups.pop(key)
+                for index in group["indices"]:
+                    _downgrade_edit(
+                        errors[index],
+                        ["TARGET_FORM_MUTATION_REJECTED", *defects],
+                    )
+        if rejected_particle_cluster:
+            continue
+
+        corrected = _apply_edit_groups(original, groups)
+        defects = introduced_target_form_defects(
+            original,
+            corrected,
+            target_form_policy,
+        )
+        if not defects:
+            return groups, corrected
+        defect_counts = Counter(defects)
+        culprit_keys = []
+        for key in groups:
+            without = {k: value for k, value in groups.items() if k != key}
+            remaining_counts = Counter(introduced_target_form_defects(
+                original,
+                _apply_edit_groups(original, without),
+                target_form_policy,
+            ))
+            if any(
+                remaining_counts.get(code, 0) < count
+                for code, count in defect_counts.items()
+            ):
+                culprit_keys.append(key)
+        if not culprit_keys:
+            culprit_keys = list(groups)
+        for key in culprit_keys:
+            group = groups.pop(key)
+            for index in group["indices"]:
+                _downgrade_edit(
+                    errors[index],
+                    ["TARGET_FORM_MUTATION_REJECTED", *defects],
+                )
+
+    return groups, _apply_edit_groups(original, groups)
+
+
 def _validate_term_span_slices(
     error: dict,
     source: str,
@@ -724,6 +889,7 @@ def validate_reference_target(
     target: object,
     *,
     label: str = "reference target",
+    target_form_policy: dict | None = None,
 ) -> str:
     """Validate a report-only full-translation suggestion.
 
@@ -756,6 +922,16 @@ def validate_reference_target(
         raise CheckFormatError(
             f"{label}: segment {segment['id']} suggestion changes protected content"
         )
+    introduced = introduced_target_form_defects(
+        original,
+        target,
+        target_form_policy,
+    )
+    if introduced:
+        raise CheckFormatError(
+            f"{label}: segment {segment['id']} suggestion introduces "
+            f"target-form defect(s): {', '.join(introduced)}"
+        )
     return target
 
 
@@ -766,6 +942,7 @@ def build_segment_result(
     allow_internal_provenance: bool = False,
     require_internal_provenance: bool = False,
     review_policy: dict | None = None,
+    target_form_policy: dict | None = None,
 ) -> dict:
     if require_internal_provenance and not allow_internal_provenance:
         raise CheckFormatError(
@@ -832,16 +1009,10 @@ def build_segment_result(
             (requires_term_evidence or has_confirmed_term_evidence)
             and not _has_matching_confirmed_term(segment, resolved, original)
         ):
-            error["needs_confirmation"] = True
-            error["edit"] = None
-            if "review_provenance" in error:
-                error["review_provenance"]["edit_origin"] = None
+            _downgrade_edit(error)
             continue
         if _damages_protected_text(segment, original, resolved):
-            error["needs_confirmation"] = True
-            error["edit"] = None
-            if "review_provenance" in error:
-                error["review_provenance"]["edit_origin"] = None
+            _downgrade_edit(error)
             continue
         resolved_by_index[index] = resolved
 
@@ -852,27 +1023,15 @@ def build_segment_result(
             if _overlaps(left, right) and not _same_edit(left, right):
                 conflicts.update((left_index, right_index))
     for index in conflicts:
-        errors[index]["needs_confirmation"] = True
-        errors[index]["edit"] = None
-        if "review_provenance" in errors[index]:
-            errors[index]["review_provenance"]["edit_origin"] = None
+        _downgrade_edit(errors[index])
 
-    unique_edits = {}
-    for index, resolved in resolved_items:
-        if index in conflicts:
-            continue
-        key = (resolved["start"], resolved["end"], resolved["from"], resolved["to"])
-        unique_edits.setdefault(key, resolved)
-
-    corrected = original
-    for resolved in sorted(
-        unique_edits.values(), key=lambda value: value["start"], reverse=True
-    ):
-        corrected = (
-            corrected[: resolved["start"]]
-            + resolved["to"]
-            + corrected[resolved["end"] :]
-        )
+    _, corrected = _gate_combined_edits(
+        original,
+        errors,
+        resolved_by_index,
+        conflicts,
+        target_form_policy,
+    )
 
     for index, error in enumerate(errors):
         provenance = error.get("review_provenance")
@@ -883,6 +1042,7 @@ def build_segment_result(
             provenance["ai_reviewed"]
             and provenance["edit_origin"] == "ai_module"
             and index not in conflicts
+            and error["edit"] is not None
             and resolved["from"] != resolved["to"]
         )
 
@@ -901,6 +1061,7 @@ def verify_results(
     allow_internal_provenance: bool = False,
     require_internal_provenance: bool = False,
     review_policy: dict | None = None,
+    target_form_policy: dict | None = None,
 ) -> list[dict]:
     if not isinstance(results, list):
         raise CheckFormatError(f"{label}: results must be an array")
@@ -942,6 +1103,7 @@ def verify_results(
             allow_internal_provenance=allow_internal_provenance,
             require_internal_provenance=require_internal_provenance,
             review_policy=review_policy,
+            target_form_policy=target_form_policy,
         )
         if entry["corrected"] != rebuilt["corrected"]:
             raise CheckFormatError(
@@ -958,6 +1120,7 @@ def build_results(
     allow_internal_provenance: bool = False,
     require_internal_provenance: bool = False,
     review_policy: dict | None = None,
+    target_form_policy: dict | None = None,
 ) -> list[dict]:
     normalized = normalize_check_entries(
         check_entries,
@@ -974,6 +1137,7 @@ def build_results(
             allow_internal_provenance=allow_internal_provenance,
             require_internal_provenance=require_internal_provenance,
             review_policy=review_policy,
+            target_form_policy=target_form_policy,
         )
         for segment in segments
     ]

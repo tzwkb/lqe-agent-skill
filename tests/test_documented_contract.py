@@ -202,9 +202,15 @@ class DocumentedContractTests(unittest.TestCase):
             "embedded_text",
             "instructions.suggestions",
             "canonical compact projection",
-            "每个 worker 最多处理 4 个 packet",
+            "每个 checker worker 最多处理 4 个 packet",
             "25,000 原译字符",
-            "总输入不得超过 100,000 字节",
+            "不设置字节硬上限",
+            'budget.max_bytes: null',
+            'budget.status: "advisory"',
+            "suggestion_context/input_measurement.json",
+            "suggestion_review_context/input_measurement.json",
+            "--worker-batch-size N",
+            "不按 bytes 自动拆批或拒绝",
             "新批次必须新建 worker",
         ):
             with self.subTest(phrase=phrase):

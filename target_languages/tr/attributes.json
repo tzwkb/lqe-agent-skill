@@ -1,0 +1,9 @@
+{
+  "script": "latin",
+  "word_delim": "space",
+  "sentence_terminator": ".!?…",
+  "numerals": [
+    "arabic"
+  ],
+  "wordcount_basis": "target-words"
+}

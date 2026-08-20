@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import lqe_review
 from lqe_context_bundle import (
+    measure_complete_worker_input_bytes,
     validate_selected_context_evidence_index,
     verify_worker_context_manifest_resources,
 )
@@ -132,8 +133,8 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
         self.assertEqual(split.returncode, 0, split.stderr)
         return job
 
-    def test_prepare_splits_on_complete_input_and_binds_each_batch(self):
-        job = self.build_job([6000, 6000, 6000, 6000])
+    def test_prepare_splits_on_review_text_and_binds_each_batch(self):
+        job = self.build_job([7000, 7000, 7000, 7000])
         prepared = self.run_script("lqe_review.py", "prepare", "--job", job)
         self.assertEqual(prepared.returncode, 0, prepared.stderr)
 
@@ -158,14 +159,36 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
         self.assertEqual(sum(batch["packet_count"] for batch in batches), 4)
         for batch in batches:
             self.assertLessEqual(batch["review_text_chars"], 25_000)
-            self.assertLessEqual(batch["worker_input_bytes"], 100_000)
             bundle_path = job / "review_packets" / batch["context_bundle_set_path"]
             manifest_path = job / "review_packets" / batch[
                 "worker_context_manifest_path"
             ]
             self.assertTrue(bundle_path.is_file())
             self.assertTrue(manifest_path.is_file())
+            bundle_set = json.loads(bundle_path.read_text(encoding="utf-8"))
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            packets = [
+                json.loads(
+                    (job / "review_packets" / packet_ref["path"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                for packet_ref in batch["packets"]
+            ]
+            self.assertIsNone(manifest["budget"]["max_bytes"])
+            self.assertEqual(manifest["budget"]["status"], "advisory")
+            self.assertEqual(
+                batch["worker_input_bytes"],
+                measure_complete_worker_input_bytes(
+                    manifest,
+                    bundle_set,
+                    packets,
+                ),
+            )
+            self.assertGreater(
+                batch["worker_input_bytes"],
+                manifest["budget"]["measured_bytes"],
+            )
             self.assertEqual(
                 verify_worker_context_manifest_resources(
                     manifest,
@@ -177,12 +200,7 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
                 manifest["worker_context_manifest_digest"],
                 batch["worker_context_manifest_digest"],
             )
-            for packet_ref in batch["packets"]:
-                packet = json.loads(
-                    (job / "review_packets" / packet_ref["path"]).read_text(
-                        encoding="utf-8"
-                    )
-                )
+            for packet_ref, packet in zip(batch["packets"], packets):
                 self.assertEqual(packet["worker_batch_id"], batch["batch_id"])
                 self.assertEqual(
                     packet["context_bundle_set_digest"],
@@ -209,7 +227,14 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
                 for batch in module_batches
             ),
         )
-        self.assertLessEqual(report["max_worker_input_bytes"], 100_000)
+        self.assertEqual(
+            report["largest_worker_input_bytes"],
+            max(
+                batch["worker_input_bytes"]
+                for module_batches in plan["modules"].values()
+                for batch in module_batches
+            ),
+        )
         accuracy_bundle_digests = {
             bundle["context_bundle_digest"]
             for batch in batches
@@ -456,8 +481,8 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
         )
         original_loader = lqe_review._load_compact_draft
 
-        def replace_after_load(path, live_packet):
-            findings = original_loader(path, live_packet)
+        def replace_after_load(path, live_packet, **kwargs):
+            findings = original_loader(path, live_packet, **kwargs)
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["budget"]["measured_bytes"] += 1
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -503,12 +528,36 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
         self.assertNotEqual(auto.returncode, 0)
         self.assertIn("packet tree is missing or stale", auto.stderr)
 
-    def test_single_minimum_over_complete_budget_fails(self):
+    def test_single_packet_over_legacy_byte_budget_is_measured_not_rejected(self):
         job = self.build_job([20_000])
         prepared = self.run_script("lqe_review.py", "prepare", "--job", job)
-        self.assertNotEqual(prepared.returncode, 0)
-        self.assertIn("exceeding budget 100000", prepared.stderr)
-        self.assertFalse((job / "review_packets").exists())
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+
+        plan = json.loads(
+            (job / "review_packets" / "batch_plan.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        batch = plan["modules"]["accuracy"][0]
+        self.assertEqual(batch["packet_count"], 1)
+        self.assertGreater(batch["worker_input_bytes"], 100_000)
+        self.assertEqual(
+            plan["policy"]["worker_input_bytes"],
+            {
+                "mode": "advisory",
+                "measurement": "complete_utf8_bytes",
+            },
+        )
+
+        manifest = json.loads(
+            (
+                job
+                / "review_packets"
+                / batch["worker_context_manifest_path"]
+            ).read_text(encoding="utf-8")
+        )
+        self.assertIsNone(manifest["budget"]["max_bytes"])
+        self.assertEqual(manifest["budget"]["status"], "advisory")
 
 
 if __name__ == "__main__":

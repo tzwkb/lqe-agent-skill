@@ -14,7 +14,6 @@ from lqe_capabilities import normalize_profile, resolve_capabilities
 from lqe_context import descriptor_registry
 from lqe_context_bundle import (
     ContextBundleError,
-    WorkerContextBudgetError,
     build_context_bundle,
     build_context_bundle_set,
     build_selected_context_evidence_index,
@@ -23,6 +22,7 @@ from lqe_context_bundle import (
     canonical_digest,
     enforce_worker_byte_budget,
     load_project_context_assets,
+    measure_complete_worker_input_bytes,
     validate_context_bundle,
     validate_loaded_project_context_assets,
     validate_shared_context_assets,
@@ -878,6 +878,38 @@ class ContextBundleSelectionTests(ContextBundleFixture):
             "entity.operator",
         )
 
+    def test_style_dimensions_reach_naturalness_and_suggestions_when_inconclusive(self):
+        segment = deepcopy(self.current)
+        constraint = segment["resolved_constraints"][0]
+        constraint["expected"] = {
+            "person": ["second"],
+            "tense": ["past"],
+            "politeness": ["formal_polite"],
+            "ending_families": ["hapsyo"],
+        }
+        constraint["runtime_evaluation"] = {
+            "status": "inconclusive",
+            "reason_codes": ["person_not_observed"],
+            "observation": {
+                "status": "observed",
+                "person": None,
+                "tense": "past",
+            },
+        }
+        view = deepcopy(self.view)
+        view["capabilities"].append("language_policy.register@1")
+        view["dimensions"] = ["naturalness", "tone"]
+
+        for module in ("naturalness", "suggestions"):
+            with self.subTest(module=module):
+                bundle = build_context_bundle(
+                    self.state,
+                    segment,
+                    module,
+                    module_view=view,
+                )
+                self.assertEqual(bundle["resolved_constraints"], [constraint])
+
     def test_relation_runtime_rule_false_is_never_worker_visible(self):
         baseline = build_context_bundle(
             self.state, self.current, "accuracy", module_view=self.view
@@ -1199,7 +1231,7 @@ class BundleSetAndManifestTests(ContextBundleFixture):
                 suggestion_instructions_path=self.files["suggestions"],
             )
 
-    def test_worker_manifest_binds_inputs_digests_and_complete_byte_budget(self):
+    def test_worker_manifest_binds_inputs_digests_and_complete_byte_measurement(self):
         bundle_set = build_context_bundle_set(
             self.state,
             [self.current],
@@ -1252,7 +1284,8 @@ class BundleSetAndManifestTests(ContextBundleFixture):
             hashlib.sha256(self.files["module"].read_bytes()).hexdigest(),
         )
         self.assertIsNone(manifest["instructions"]["suggestions"])
-        self.assertEqual(manifest["budget"]["status"], "within_budget")
+        self.assertEqual(manifest["budget"]["status"], "advisory")
+        self.assertIsNone(manifest["budget"]["max_bytes"])
         self.assertGreater(manifest["budget"]["measured_bytes"], 0)
         self.assertEqual(
             manifest["language_providers"][0]["id"], "ko.register"
@@ -1262,19 +1295,53 @@ class BundleSetAndManifestTests(ContextBundleFixture):
             "embedded_text",
         )
 
-        with self.assertRaisesRegex(WorkerContextBudgetError, "split the batch"):
-            build_worker_context_manifest(
-                self.state,
-                "accuracy",
-                bundle_set,
-                max_worker_bytes=manifest["budget"]["measured_bytes"] - 1,
-                packet_payloads=packets,
-                common_instructions_path=self.files["common"],
-                module_instructions_path=self.files["module"],
-                suggestion_instructions_path=self.files["suggestions"],
-            )
+        over_legacy_limit = build_worker_context_manifest(
+            self.state,
+            "accuracy",
+            bundle_set,
+            max_worker_bytes=manifest["budget"]["measured_bytes"] - 1,
+            packet_payloads=packets,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["module"],
+            suggestion_instructions_path=self.files["suggestions"],
+        )
+        self.assertEqual(over_legacy_limit, manifest)
 
-    def test_worker_resource_locators_are_safe_resolvable_and_budget_bound(self):
+        without_legacy_limit = build_worker_context_manifest(
+            self.state,
+            "accuracy",
+            bundle_set,
+            packet_payloads=packets,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["module"],
+            suggestion_instructions_path=self.files["suggestions"],
+        )
+        self.assertEqual(without_legacy_limit, manifest)
+
+        legacy = deepcopy(manifest)
+        legacy["budget"]["max_bytes"] = 1
+        legacy["budget"]["status"] = "within_budget"
+        legacy["worker_context_manifest_digest"] = canonical_digest(
+            {
+                key: value
+                for key, value in legacy.items()
+                if key != "worker_context_manifest_digest"
+            }
+        )
+        self.assertEqual(validate_worker_context_manifest(legacy), legacy)
+
+        no_max = deepcopy(manifest)
+        del no_max["budget"]["max_bytes"]
+        no_max["worker_context_manifest_digest"] = canonical_digest(
+            {
+                key: value
+                for key, value in no_max.items()
+                if key != "worker_context_manifest_digest"
+            }
+        )
+        self.assertEqual(validate_worker_context_manifest(no_max), no_max)
+
+    def test_worker_resource_locators_are_safe_resolvable_and_byte_accounted(self):
         bundle_set = build_context_bundle_set(
             self.state,
             [self.current],
@@ -1427,7 +1494,7 @@ class BundleSetAndManifestTests(ContextBundleFixture):
         with self.assertRaisesRegex(ContextBundleError, "entry digest mismatch"):
             validate_selected_context_evidence_index(tampered)
 
-    def test_budget_helpers_measure_utf8_and_never_truncate(self):
+    def test_budget_helpers_measure_utf8_without_enforcing_legacy_limit(self):
         components = ["中文", {"b": 2, "a": 1}, b"raw"]
         expected = len("中文".encode("utf-8")) + len(
             json.dumps(
@@ -1440,8 +1507,95 @@ class BundleSetAndManifestTests(ContextBundleFixture):
 
         self.assertEqual(calculate_worker_input_bytes(components), expected)
         self.assertEqual(enforce_worker_byte_budget(components, expected), expected)
-        with self.assertRaises(WorkerContextBudgetError):
-            enforce_worker_byte_budget(components, expected - 1)
+        self.assertEqual(enforce_worker_byte_budget(components, expected - 1), expected)
+        self.assertEqual(enforce_worker_byte_budget(components), expected)
+
+    def test_complete_worker_measurement_counts_envelopes_packets_and_resources(self):
+        bundle_set = build_context_bundle_set(
+            self.state,
+            [self.current],
+            "accuracy",
+            module_view=self.view,
+        )
+        packets = [{"packet": 1, "segments": [{"id": 2}]}]
+        extra = {"schema": "fixture.extra", "text": "附加输入"}
+
+        def canonical_size(value: object) -> int:
+            return len(
+                json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+
+        external_manifest = build_worker_context_manifest(
+            self.state,
+            "accuracy",
+            bundle_set,
+            packet_payloads=packets,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["module"],
+            job_root=self.root,
+        )
+        expected_external = (
+            canonical_size(external_manifest)
+            + canonical_size(bundle_set)
+            + sum(canonical_size(packet) for packet in packets)
+            + external_manifest["budget"]["components"]["readable_resources"]
+            + canonical_size(extra)
+        )
+        self.assertEqual(
+            measure_complete_worker_input_bytes(
+                external_manifest,
+                bundle_set,
+                packets,
+                additional_inputs=[extra],
+            ),
+            expected_external,
+        )
+
+        embedded_manifest = build_worker_context_manifest(
+            self.state,
+            "accuracy",
+            bundle_set,
+            packet_payloads=packets,
+            common_instructions_path=self.files["common"],
+            module_instructions_path=self.files["module"],
+        )
+        self.assertTrue(
+            all(
+                summary["locator"]["kind"] == "embedded_text"
+                for summary in [
+                    embedded_manifest["language_notes"],
+                    *embedded_manifest["worker_documents"],
+                    embedded_manifest["instructions"]["common"],
+                    embedded_manifest["instructions"]["module"],
+                ]
+            )
+        )
+        expected_embedded = (
+            canonical_size(embedded_manifest)
+            + canonical_size(bundle_set)
+            + sum(canonical_size(packet) for packet in packets)
+            + canonical_size(extra)
+        )
+        self.assertEqual(
+            measure_complete_worker_input_bytes(
+                embedded_manifest,
+                bundle_set,
+                packets,
+                additional_inputs=[extra],
+            ),
+            expected_embedded,
+        )
+        with self.assertRaisesRegex(ContextBundleError, "payload count"):
+            measure_complete_worker_input_bytes(
+                embedded_manifest,
+                bundle_set,
+                [],
+            )
 
     def test_manifest_missing_source_manifest_and_digest_tampering_fail_closed(self):
         bundle_set = build_context_bundle_set(

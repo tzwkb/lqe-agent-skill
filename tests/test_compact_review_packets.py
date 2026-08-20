@@ -1,6 +1,7 @@
 import csv
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ CHUNK_SCRIPT = SCRIPTS / "lqe_chunk.py"
 REVIEW_SCRIPT = SCRIPTS / "lqe_review.py"
 sys.path.insert(0, str(SCRIPTS))
 
+from lqe_engine import build_review_policy
 from lqe_review import build_review_packet, build_worker_batch_plan
 
 
@@ -228,8 +230,10 @@ class CompactReviewPacketTests(unittest.TestCase):
             {
                 "max_packets_per_worker": 4,
                 "max_review_text_chars_per_worker": 25_000,
-                "max_worker_input_bytes": 100_000,
-                "single_minimum_over_budget_fails": True,
+                "worker_input_bytes": {
+                    "mode": "advisory",
+                    "measurement": "complete_utf8_bytes",
+                },
             },
         )
 
@@ -273,6 +277,41 @@ class CompactReviewPacketTests(unittest.TestCase):
             ],
             [0, 1, 2, 3, 4],
         )
+
+    def test_batch_plan_measures_bytes_without_splitting_on_them(self):
+        packets = [
+            build_review_packet(
+                {
+                    "chunk_id": chunk_id,
+                    "iteration": 0,
+                    "split_fingerprint": "split",
+                    "payload_digest": f"chunk-{chunk_id}",
+                    "segments": [
+                        {
+                            "id": chunk_id,
+                            "source": "源文",
+                            "target": "Target",
+                            "kind": "name",
+                            "precheck": [
+                                issue("Markup", "x" * 40_000),
+                            ],
+                        }
+                    ],
+                },
+                "precheck_review",
+            )
+            for chunk_id in range(4)
+        ]
+
+        plan = build_worker_batch_plan(
+            {"split_fingerprint": "split"},
+            ["precheck_review"],
+            packets,
+        )
+
+        batches = plan["modules"]["precheck_review"]
+        self.assertEqual([batch["packet_count"] for batch in batches], [4])
+        self.assertGreater(batches[0]["worker_input_bytes"], 100_000)
 
     def test_sparse_draft_expands_to_formal_full_coverage(self):
         prepared = self.prepare()
@@ -538,6 +577,253 @@ class CompactReviewPacketTests(unittest.TestCase):
         self.assertFalse(
             (self.job / "chunks" / "chunk_00.accuracy.json").exists()
         )
+
+    def test_reuse_drafts_rebinds_full_content_for_optimized_publish(self):
+        self.precheck[2]["issues"][0]["precheck_ref"] = (
+            "precheck:2:source-semantic-ref"
+        )
+        write_json(self.precheck_path, self.precheck)
+        source_state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        source_state["review_policy"] = build_review_policy("full")
+        write_json(self.state_path, source_state)
+        resplit = self.run_script(
+            CHUNK_SCRIPT,
+            "split",
+            "--state",
+            self.state_path,
+            "--errors",
+            self.precheck_path,
+            "--outdir",
+            self.job / "chunks",
+            "--size",
+            100,
+        )
+        self.assertEqual(resplit.returncode, 0, resplit.stderr)
+        prepared = self.prepare()
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        source_packet = self.packet("grammar")
+        source_draft = self.job / "drafts" / "grammar_chunk_00.json"
+        write_json(
+            source_draft,
+            self.draft(
+                source_packet,
+                [
+                    {
+                        "id": 0,
+                        "issues": [
+                            {
+                                "category": "Spelling",
+                                "severity": "Minor",
+                                "comment": "The word is misspelled.",
+                                "needs_confirmation": False,
+                                "edit": {
+                                    "from": "eror",
+                                    "to": "error",
+                                    "evidence": None,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            ),
+        )
+        source_precheck_packet = self.packet("precheck_review")
+        source_precheck_ref = source_precheck_packet["segments"][0][
+            "precheck"
+        ][0]["precheck_ref"]
+        source_precheck_draft = (
+            self.job / "drafts" / "precheck_review_chunk_00.json"
+        )
+        write_json(
+            source_precheck_draft,
+            self.draft(
+                source_precheck_packet,
+                [
+                    {
+                        "id": 2,
+                        "issues": [
+                            {
+                                "category": "Markup",
+                                "severity": "Major",
+                                "comment": "The target drops one tag.",
+                                "needs_confirmation": True,
+                                "edit": None,
+                                "precheck_ref": source_precheck_ref,
+                            }
+                        ],
+                    }
+                ],
+            ),
+        )
+
+        target = Path(self.tempdir.name) / "target"
+        shutil.copytree(self.job, target)
+        target_state_path = target / "state.json"
+        target_state = json.loads(target_state_path.read_text(encoding="utf-8"))
+        target_state["review_policy"] = build_review_policy("optimized")
+        write_json(target_state_path, target_state)
+        target_precheck_path = target / "errors_precheck.json"
+        target_precheck = json.loads(
+            target_precheck_path.read_text(encoding="utf-8")
+        )
+        target_precheck[2]["issues"][0]["precheck_ref"] = (
+            "precheck:2:target-semantic-ref"
+        )
+        target_precheck[2]["issues"][0]["protected"] = False
+        write_json(target_precheck_path, target_precheck)
+        target_split = self.run_script(
+            CHUNK_SCRIPT,
+            "split",
+            "--state",
+            target_state_path,
+            "--errors",
+            target / "errors_precheck.json",
+            "--outdir",
+            target / "chunks",
+            "--size",
+            100,
+        )
+        self.assertEqual(target_split.returncode, 0, target_split.stderr)
+        target_prepare = self.run_script(
+            REVIEW_SCRIPT, "prepare", "--job", target
+        )
+        self.assertEqual(target_prepare.returncode, 0, target_prepare.stderr)
+        target_precheck_packet = json.loads(
+            (
+                target
+                / "review_packets"
+                / "precheck_review"
+                / "chunk_00.json"
+            ).read_text(encoding="utf-8")
+        )
+        target_precheck_ref = target_precheck_packet["segments"][0][
+            "precheck"
+        ][0]["precheck_ref"]
+        self.assertNotEqual(source_precheck_ref, target_precheck_ref)
+
+        reused = self.run_script(
+            REVIEW_SCRIPT,
+            "reuse-drafts",
+            "--source-job",
+            self.job,
+            "--job",
+            target,
+        )
+        self.assertEqual(reused.returncode, 0, reused.stderr)
+        rebound_path = target / "reused_drafts" / "grammar" / "chunk_00.json"
+        rebound = json.loads(rebound_path.read_text(encoding="utf-8"))
+        rebound_issue = rebound["findings"][0]["issues"][0]
+        self.assertTrue(rebound_issue["needs_confirmation"])
+        self.assertIsNone(rebound_issue["edit"])
+        self.assertEqual(
+            rebound["migration_receipt"]["normalizations"],
+            {
+                "minor_policy": 1,
+                "precheck_ref_rebound": 0,
+                "precheck_edit_cleared": 0,
+                "term_span_reanchored": 0,
+            },
+        )
+        self.assertEqual(
+            rebound["worker_receipt"],
+            self.draft(source_packet, [])["worker_receipt"],
+        )
+        rebound_precheck_path = (
+            target
+            / "reused_drafts"
+            / "precheck_review"
+            / "chunk_00.json"
+        )
+        if not rebound_precheck_path.is_file():
+            self.fail(
+                (target / "reused_drafts" / "report.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        rebound_precheck = json.loads(
+            rebound_precheck_path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            rebound_precheck["findings"][0]["issues"][0]["precheck_ref"],
+            target_precheck_ref,
+        )
+        self.assertEqual(
+            rebound_precheck["migration_receipt"]["normalizations"][
+                "precheck_ref_rebound"
+            ],
+            1,
+        )
+
+        invalid_batch = Path(self.tempdir.name) / "invalid-reused-drafts"
+        shutil.copytree(target / "reused_drafts", invalid_batch)
+        invalid_precheck_path = (
+            invalid_batch / "precheck_review" / "chunk_00.json"
+        )
+        invalid_precheck = json.loads(
+            invalid_precheck_path.read_text(encoding="utf-8")
+        )
+        invalid_precheck["packet_digest"] = "0" * 64
+        write_json(invalid_precheck_path, invalid_precheck)
+        rejected_batch = self.run_script(
+            REVIEW_SCRIPT,
+            "publish-directory",
+            "--job",
+            target,
+            "--input-dir",
+            invalid_batch,
+        )
+        self.assertNotEqual(rejected_batch.returncode, 0)
+        self.assertIn("packet_digest mismatch", rejected_batch.stderr)
+        self.assertFalse(
+            (target / "chunks" / "chunk_00.grammar.receipt.json").exists()
+        )
+        self.assertFalse(
+            (
+                target
+                / "chunks"
+                / "chunk_00.precheck_review.receipt.json"
+            ).exists()
+        )
+
+        published = self.run_script(
+            REVIEW_SCRIPT,
+            "publish-directory",
+            "--job",
+            target,
+            "--input-dir",
+            target / "reused_drafts",
+        )
+        self.assertEqual(published.returncode, 0, published.stderr)
+        self.assertIn("published 2", published.stdout)
+        receipt = json.loads(
+            (
+                target
+                / "chunks"
+                / "chunk_00.grammar.receipt.json"
+            ).read_text(encoding="utf-8")
+        )
+        provenance = receipt["review_provenance"]
+        self.assertEqual(provenance["worker_receipt"], rebound["worker_receipt"])
+        self.assertEqual(
+            provenance["migration_receipt"], rebound["migration_receipt"]
+        )
+        self.assertTrue(
+            (
+                target
+                / "chunks"
+                / "chunk_00.precheck_review.receipt.json"
+            ).is_file()
+        )
+        skipped = self.run_script(
+            REVIEW_SCRIPT,
+            "publish-directory",
+            "--job",
+            target,
+            "--input-dir",
+            target / "reused_drafts",
+        )
+        self.assertEqual(skipped.returncode, 0, skipped.stderr)
+        self.assertIn("skipped valid existing receipts 2", skipped.stdout)
 
 
 if __name__ == "__main__":

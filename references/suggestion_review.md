@@ -4,6 +4,8 @@
 
 单批时读取根 packet；若根 packet 带 `batch_plan`，根 packet 只供本地汇总，每个新 verifier 只读取计划列出的一个 `packet.json`，并把草稿写到该批 `draft_path`。同时读取 packet 指向的 generation `worker_manifest.json`、`bundle_set.json` 和 `content_index.json` 全部可读资料。verifier 与 generation 使用同一份逐句 `checker_selected_evidence.strict_union`：它是实际 checker 已选择的句段上下文、人物事实、关系、运行时示例、约束和邻句的唯一正式并集。SG、背景、确认规则和语言说明仍完整可读，但不能用于替当前句重新选取或扩大正式证据；完整 source manifest 只做 runtime live validation，不作为 worker 语义全文。索引仅用于 path/digest 审计，不由 worker 整体读取。
 
+主 Agent在派发前已经读取 `suggestion_review_context/input_measurement.json` 并作出本轮判断。verifier 沿用 generation 批次边界；bytes 只作 advisory 实测，不得据此自行拆批、拒绝或截断资料。
+
 逐项以 source 为准检查：
 
 1. subjects；

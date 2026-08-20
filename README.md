@@ -67,9 +67,10 @@ lqe-translator/
     ├── errors.json
     ├── chunks/
     ├── review_packets/context/<module>/batch_NN/
-    ├── suggestion_context/
+    ├── suggestion_context/            # Includes advisory input_measurement.json
     ├── reference_suggestions.packet.json
     ├── reference_suggestions.candidates.json
+    ├── suggestion_review_context/     # Includes advisory input_measurement.json
     ├── suggestion_review.packet.json
     ├── suggestion_review.json
     ├── reference_suggestions.json
@@ -239,7 +240,7 @@ python3 "$SCRIPTS/lqe_review.py" prepare --job "$JOB"
 python3 "$SCRIPTS/lqe_review.py" auto-publish --job "$JOB"
 ```
 
-`split` reads terminology through the state in standard mode. `--terms <file>` is an optional standard-mode override and is rejected in no-terminology mode. Without an explicit `--size`, enforce-mode context jobs use a conservative five-segment cap; off and shadow jobs retain the legacy 100-segment default. An explicit `--size` always wins. This reserves worker-input space for rich context; `prepare` still enforces the 100,000-byte hard limit and fails rather than truncating an oversized indivisible unit. Split inputs are fingerprinted; when the state, current target, scope, pre-check, terms, or effective split settings change, stale chunk artifacts are archived and old module outputs cannot be reused.
+`split` reads terminology through the state in standard mode. `--terms <file>` is an optional standard-mode override and is rejected in no-terminology mode. Without an explicit `--size`, enforce-mode context jobs use a conservative five-segment cap; off and shadow jobs retain the legacy 100-segment default. An explicit `--size` always wins. This controls rich-context density. `prepare` measures the complete worker input without imposing a byte ceiling or truncating any resource. Split inputs are fingerprinted; when the state, current target, scope, pre-check, terms, or effective split settings change, stale chunk artifacts are archived and old module outputs cannot be reused.
 
 `prepare` creates generation-bound, module-specific `review_packets`, `batch_plan.json`, `cost_report.json`, and `selected_evidence_index.json`. The index records the evidence actually selected for each checker module and segment, rather than a broader configured view. Non-terminology modules no longer receive terminology or pre-check fields they do not use. Protected segments and inapplicable `precheck_review` rows are deterministically filled with empty results. `auto-publish` handles only packets that require no AI review.
 
@@ -259,7 +260,7 @@ chunk_NN.grammar.json
 chunk_NN.naturalness.json
 ```
 
-Assign bounded workers from `batch_plan.json`. One worker handles at most four packets and no more than 25,000 source-plus-target characters or 100,000 total input bytes across instructions, project context, shared assets, bundles, manifests, and packets. A smallest indivisible unit that still exceeds the limit fails instead of being truncated. Every readable manifest resource has a safe `job_relative`, `skill_relative`, or `embedded_text` locator whose content digest and bytes are budget-bound. Every new batch starts a new worker and reloads the module specification and job context.
+Assign bounded workers from `batch_plan.json`. One checker handles at most four packets and no more than 25,000 source-plus-target characters. Complete input bytes across instructions, project context, shared assets, bundles, manifests, and packets are measured but have no scripted hard limit. Manifest `budget.measured_bytes` is the component baseline; batch plans, cost reports, and suggestion `input_measurement.json` files record the complete dispatch value including manifest/bundle envelopes and actual packets. Before checker dispatch, the main agent inspects the `review_packets` batch plan, cost report, and per-batch manifest. Before suggestion generation or verification, it inspects the corresponding `input_measurement.json`, any present batch plan, and the worker manifest referenced by the packet, then decides whether to proceed or replan for the current model and task. New manifests use `budget.max_bytes: null` and `budget.status: "advisory"`. Every readable manifest resource has a safe `job_relative`, `skill_relative`, or `embedded_text` locator whose content digest and byte count remain bound; nothing may be truncated to reduce the measurement. Every new batch starts a new worker and reloads the module specification and job context.
 
 The model writes a compact draft: `reviewed_ids` exactly copies the packet, while `findings` contains only ids with issues. The draft also copies the selected-evidence binding and records the actual checker `worker_id` plus a unique `run_id`. Publish it with `lqe_review.py publish --job "$JOB" --chunk <NN> --module <module> --input <draft.json>`. The publisher restores formal full-id coverage and binds the packet, checker receipt, and `selected_evidence_index.json` to the formal module publication receipt.
 
@@ -322,7 +323,7 @@ The tabular columns `content_type`, `text_type`, `文本类型`, and `文本类�
 
 New jobs also bind stable segment identity, source provenance, and a project asset/capability snapshot. Use `--sheet`, `--key-col`, and repeatable `--context-col FIELD=COLUMN` when the input carries explicit context; aliases include `--content-type-col`, `--speaker-col`, and `--addressee-col`. Optional profile capabilities affect formal packets only in `enforce` mode; `shadow` writes `shadow_context/context.json` and never feeds formal deduplication, review, suggestions, or reports. Legacy `.xls` is read with `xlrd>=2.0` and corrected output is always `.xlsx`.
 
-Profile v2 uses an asset registry to declare path, authority, provenance, and distribution, plus a capability registry to decide which modules may see each resource. Use canonical JSON assets for entities, relationships, review examples, and language policies. A module view that enables `language_policy.*` and consumes its decisions must declare the corresponding `constraint_kinds`; omission is a profile error rather than a silent loss of resolved rules. Raw XLSX/DOCX may remain as provenance, but merely placing files in a directory never injects them. Each batch's `worker_manifest.json` binds the actual instructions, style guide, language notes, shared assets, context bundles, and packets through safe, digest-checked locators. Checker manifests set `instructions.suggestions` to null; only the suggestions worker receives that specification. Full project-source manifests remain runtime-validated audit inputs, while workers receive a budgeted canonical compact projection instead of the raw manifest. `review_packets/selected_evidence_index.json` records the actual per-module, per-segment evidence selection for strict downstream union. Total worker input is capped at 100,000 bytes.
+Profile v2 uses an asset registry to declare path, authority, provenance, and distribution, plus a capability registry to decide which modules may see each resource. Use canonical JSON assets for entities, relationships, review examples, and language policies. A module view that enables `language_policy.*` and consumes its decisions must declare the corresponding `constraint_kinds`; omission is a profile error rather than a silent loss of resolved rules. Raw XLSX/DOCX may remain as provenance, but merely placing files in a directory never injects them. Each batch's `worker_manifest.json` binds the actual instructions, style guide, language notes, shared assets, context bundles, and packets through safe, digest-checked locators. Checker manifests set `instructions.suggestions` to null; only the suggestions worker receives that specification. Full project-source manifests remain runtime-validated audit inputs, while workers receive a measured canonical compact projection instead of the raw manifest. `review_packets/selected_evidence_index.json` records the actual per-module, per-segment evidence selection for strict downstream union. Worker bytes are advisory runtime evidence for the main agent, not an automatic acceptance threshold.
 
 Cross-sheet or cross-version checks use `--pivot-sheet`, `--pivot-key-col`, repeatable `--pivot-compare`, and explicit `--pivot-authority`. Missing, duplicate, or authoritative mismatched keys block review. A historical job without `job_runtime_contract_version: 2` is validation-only; resume it by creating a new bound job:
 
@@ -354,7 +355,8 @@ When full-sentence reference suggestions are needed, run after merge and calc:
 
 ```bash
 python3 "$SCRIPTS/lqe_suggestions.py" prepare \
-  --job "$JOB" --severities "Major,Critical" --only-missing
+  --job "$JOB" --severities "Major,Critical" --only-missing \
+  [--worker-batch-size N]
 python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates \
   --job "$JOB" --input <reference-suggestion-draft.json>
 python3 "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB"
@@ -364,6 +366,8 @@ python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
 `optimized` defaults candidates to Major/Critical; `full` defaults to every severity. Unresolved terminology decisions, blocked/protected segments, and constraint conflicts are rejected before generation. Resolved constraints are re-evaluated against the generated candidate: a definite mismatch is rejected, while an inconclusive result goes to the independent verifier. Only accepted candidates enter the v5 final artifact; stale candidate, review, or final digests fail closed.
+
+Generation defaults to one batch when `--worker-batch-size` is omitted. After inspecting the advisory measurements in `suggestion_context/input_measurement.json`, the main agent may rerun prepare with an explicit candidate count per batch. The verifier follows the generation batch boundaries and records its complete measurement in `suggestion_review_context/input_measurement.json`. Neither stage automatically splits, rejects, or truncates input based on bytes.
 
 Missing speaker, addressee, or relationship fields do not automatically require abstention. If the source itself establishes the speech act, intensity, or hostility and the candidate can preserve it without choosing an unknown relationship, form of address, pronoun, politeness level, or character voice, generation proceeds with source-form evidence. A published candidate must have an empty `tone_decision.uncertainties`: resolved or safely avoided gaps belong in evidence, while any unknown that would materially change the wording requires abstention.
 

@@ -67,9 +67,10 @@ lqe-translator/
     ├── errors.json
     ├── chunks/
     ├── review_packets/context/<module>/batch_NN/
-    ├── suggestion_context/
+    ├── suggestion_context/            # 含 advisory input_measurement.json
     ├── reference_suggestions.packet.json
     ├── reference_suggestions.candidates.json
+    ├── suggestion_review_context/     # 含 advisory input_measurement.json
     ├── suggestion_review.packet.json
     ├── suggestion_review.json
     ├── reference_suggestions.json
@@ -248,7 +249,7 @@ python3 "$SCRIPTS/lqe_review.py" prepare --job "$JOB"
 python3 "$SCRIPTS/lqe_review.py" auto-publish --job "$JOB"
 ```
 
-标准模式下，`split` 通过 state 读取术语；`--terms <file>` 只是可选覆盖，无术语模式会拒绝该参数。未显式传 `--size` 时，enforce 上下文任务默认每块最多 5 段，off/shadow 保持原来的 100 段；显式 `--size` 始终优先。该默认值为富上下文预留 worker 输入空间；`prepare` 仍执行 100,000 字节硬校验，不可再拆的单段超限时失败而不截断。分块输入带指纹；state、当前译文、scope、预检、术语或最终生效的分块参数变化时，旧 chunks 会归档，旧模块输出不可复用。每个 `chunk_NN.json` 按 `state.check_scope` 生成：
+标准模式下，`split` 通过 state 读取术语；`--terms <file>` 只是可选覆盖，无术语模式会拒绝该参数。未显式传 `--size` 时，enforce 上下文任务默认每块最多 5 段，off/shadow 保持原来的 100 段；显式 `--size` 始终优先。该默认值用于控制富上下文任务的单批资料密度；`prepare` 完整计量 worker 输入，但不设置字节硬上限，也不截断任何资料。分块输入带指纹；state、当前译文、scope、预检、术语或最终生效的分块参数变化时，旧 chunks 会归档，旧模块输出不可复用。每个 `chunk_NN.json` 按 `state.check_scope` 生成：
 
 `prepare` 生成与当前 chunk 绑定的模块专用 `review_packets`、`batch_plan.json`、`cost_report.json` 和 `selected_evidence_index.json`。该索引记录各 checker 模块对每个句段实际选中的证据，而不是更宽泛的配置视图。非术语模块不再重复读取术语与预检字段；受保护段和 `precheck_review` 的不适用段由脚本补空。`auto-publish` 只发布完全不需要 AI 的 packet。
 
@@ -266,7 +267,7 @@ chunk_NN.grammar.json
 chunk_NN.naturalness.json
 ```
 
-按 `batch_plan.json` 为每个模块分配有界 worker：每批最多 4 个 packet，同时不超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。每份可读资料都必须带安全的 `job_relative`、`skill_relative` 或 `embedded_text` locator，其内容摘要和字节数计入预算。不可再拆的最小单元仍超限时直接失败，不截断。每个新批次重新读取模块说明和项目上下文。
+按 `batch_plan.json` 为每个模块分配有界 worker：每个 checker 批次最多 4 个 packet，同时不超过 25,000 原译字符。instructions、项目资料、共享资产、bundle、manifest 和 packet 的完整输入字节继续计量，但不设程序硬上限。manifest 的 `budget.measured_bytes` 是组件基线，包含 manifest/bundle 外壳和实际 packet 的完整批次值由 batch plan/cost report 或 suggestion `input_measurement.json` 记录。主 Agent在派发 checker 前读取 `review_packets` 的 batch plan、cost report 和批次 manifest；派发建议生成或复核前分别读取对应 `input_measurement.json`、存在时的 batch plan，以及 packet 引用的 worker manifest，再结合当次模型与任务自行决定继续还是重新规划。新 manifest 使用 `budget.max_bytes: null`、`budget.status: "advisory"`。每份可读资料都必须带安全的 `job_relative`、`skill_relative` 或 `embedded_text` locator，并绑定摘要和字节数；不得通过截断降低计量。每个新批次重新读取模块说明和项目上下文。
 
 模型写紧凑草稿：`reviewed_ids` 完整复制 packet，`findings` 只保留有问题的 id；同时复制 selected evidence 绑定，并填写实际 checker 的 `worker_id` 与本次唯一 `run_id`。用 `lqe_review.py publish --job "$JOB" --chunk <NN> --module <module> --input <草稿.json>` 发布。publisher 会补齐正式全 ID 数组，并把 packet、checker receipt 与 `selected_evidence_index.json` 绑定到正式 module publication receipt。
 
@@ -329,7 +330,7 @@ chunk_NN.naturalness.json
 
 新任务同时绑定稳定句段身份、来源证据以及项目资产/能力快照。输入含显式上下文时使用 `--sheet`、`--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`。可选能力只有在 `enforce` 模式才进入正式 packet；`shadow` 写入独立 `shadow_context/context.json`，不进入正式去重、审校、建议或报告。旧 `.xls` 由 `xlrd>=2.0` 只读，corrected 固定输出 `.xlsx`。
 
-profile v2 用 asset registry 声明资料的路径、权威级别、来源和分发范围，并用 capability registry 决定各模块能读取什么。人物、关系、剧情示例和语言规则应使用 canonical JSON 资产；模块启用 `language_policy.*` 并消费其结论时，必须同时声明对应 `constraint_kinds`，缺失会直接判 profile 无效，不再静默丢掉已解析规则。原始 XLSX/DOCX 可保留作溯源，但不会因放在目录里而自动注入。`worker_manifest.json` 通过安全、可核验的 locator 绑定每批 worker 实际读取的 instructions、SG、语言说明、共享资产、context bundle 和 packet。checker 的 `instructions.suggestions` 为 null，只有建议生成 worker 接收该说明；完整 project source manifest 保持 runtime 实时校验，worker 只接收计入预算的 canonical compact projection，不读取原始审计全文。`review_packets/selected_evidence_index.json` 逐模块、逐句段记录实际选中的证据，供后续建议阶段取严格并集。总输入上限为 100,000 bytes。
+profile v2 用 asset registry 声明资料的路径、权威级别、来源和分发范围，并用 capability registry 决定各模块能读取什么。人物、关系、剧情示例和语言规则应使用 canonical JSON 资产；模块启用 `language_policy.*` 并消费其结论时，必须同时声明对应 `constraint_kinds`，缺失会直接判 profile 无效，不再静默丢掉已解析规则。原始 XLSX/DOCX 可保留作溯源，但不会因放在目录里而自动注入。`worker_manifest.json` 通过安全、可核验的 locator 绑定每批 worker 实际读取的 instructions、SG、语言说明、共享资产、context bundle 和 packet。checker 的 `instructions.suggestions` 为 null，只有建议生成 worker 接收该说明；完整 project source manifest 保持 runtime 实时校验，worker 只接收已计量的 canonical compact projection，不读取原始审计全文。`review_packets/selected_evidence_index.json` 逐模块、逐句段记录实际选中的证据，供后续建议阶段取严格并集。worker 输入字节只作主 Agent本轮判断的审计证据，不是程序接受阈值。
 
 跨 sheet/版本核对使用 `--pivot-sheet`、`--pivot-key-col`、可重复的 `--pivot-compare` 和显式 `--pivot-authority`；同 key 不完整、重复或 authoritative 值冲突会在审校前阻断。历史任务缺 `job_runtime_contract_version: 2` 时只能验证既有产物；续跑需用：
 
@@ -361,7 +362,8 @@ python3 "$SCRIPTS/lqe_calc.py" \
 
 ```bash
 python3 "$SCRIPTS/lqe_suggestions.py" prepare \
-  --job "$JOB" --severities "Major,Critical" --only-missing
+  --job "$JOB" --severities "Major,Critical" --only-missing \
+  [--worker-batch-size N]
 python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates \
   --job "$JOB" --input <参考建议草稿.json>
 python3 "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB"
@@ -371,6 +373,8 @@ python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 ```
 
 `optimized` 默认只将 Major/Critical 放入候选；`full` 默认纳入全部严重度。未解决术语结论、blocked/保护段和约束冲突在生成前直接拒绝；生成后再按候选文本重评已解析约束。明确不匹配的候选硬拒绝，无法确定的候选交给独立 verifier。只有验收通过的候选才能进入 v5 正式建议；candidate、review 或 final 摘要过期均 fail closed。
+
+不传 `--worker-batch-size` 时 generation 默认单批。主 Agent读取 `suggestion_context/input_measurement.json` 的 advisory 实测后，可按本轮判断重新 prepare 并显式指定每批候选数；verifier 沿用 generation 批次，并在 `suggestion_review_context/input_measurement.json` 记录自己的完整实测。两阶段都不按 bytes 自动拆批、拒绝或截断。
 
 缺少说话人、受话人或关系字段不等于自动弃权。若源文已经明确 speech act、强度或敌意，且候选不需要选择未知关系、称谓、代词、礼貌等级或角色口吻即可保持这些信息，生成 worker 应引用源文证据继续生成。正式候选的 `tone_decision.uncertainties` 必须为空：已解决或通过中性表达规避的缺口写入 evidence；仍会改变译文的未知信息必须弃权，不能带着不确定性进入发布链。
 

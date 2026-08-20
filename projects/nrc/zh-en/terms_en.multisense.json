@@ -1,49 +1,15 @@
 [
  {
-  "source": "洛克王国",
-  "senses": [
-   {
-    "target": "อาณาจักรโรโค",
-    "category": "Administrative Region",
-    "confirmed": true,
-    "protected": false
-   },
-   {
-    "target": "Roco Kingdom",
-    "category": "Core Lore",
-    "confirmed": true,
-    "protected": false
-   }
-  ]
- },
- {
-  "source": "嫉妒",
-  "senses": [
-   {
-    "target": "เอนวี่",
-    "category": "Named NPC",
-    "confirmed": true,
-    "protected": false
-   },
-   {
-    "target": "ริษยา",
-    "category": "Jini Combat System",
-    "confirmed": true,
-    "protected": false
-   }
-  ]
- },
- {
   "source": "噜噜",
   "senses": [
    {
-    "target": "ฮูลู",
+    "target": "Hoolu",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "มิสเตอร์ฮูลู",
+    "target": "Mr. Hoolu",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -54,13 +20,13 @@
   "source": "翼龙",
   "senses": [
    {
-    "target": "เซฟี",
+    "target": "Zephy",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "เทอริล",
+    "target": "Pteryl",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
@@ -71,13 +37,13 @@
   "source": "伊兰",
   "senses": [
    {
-    "target": "เทมพี",
+    "target": "Tempie",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "อีลาน",
+    "target": "Elan",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -88,13 +54,13 @@
   "source": "机械精灵",
   "senses": [
    {
-    "target": "เฟอร์โร",
+    "target": "Ferrix",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "จินนี่จักรกล",
+    "target": "Mechanical Jini",
     "category": "Core Lore",
     "confirmed": true,
     "protected": false
@@ -105,13 +71,13 @@
   "source": "松仔",
   "senses": [
    {
-    "target": "โคนี่ย์",
+    "target": "Cony",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "โคนี่",
+    "target": "Conie",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -122,13 +88,13 @@
   "source": "伊贝儿",
   "senses": [
    {
-    "target": "มอสซิป",
+    "target": "Mossip",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ไอเบอร์รี",
+    "target": "Iberry",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -139,13 +105,13 @@
   "source": "书卷守护",
   "senses": [
    {
-    "target": "สโครลลาร์ด",
+    "target": "Scrollard",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ผู้พิทักษ์คัมภีร์",
+    "target": "Libris",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -156,13 +122,13 @@
   "source": "咔咔羽毛",
   "senses": [
    {
-    "target": "คากู",
+    "target": "Kacoo",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "เชอร์พี",
+    "target": "Chirpy",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -173,30 +139,13 @@
   "source": "翠顶夫人",
   "senses": [
    {
-    "target": "ไซเกลซ",
+    "target": "Cyglace",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "มาดามไซเกลซ",
-    "category": "Creature Individual",
-    "confirmed": true,
-    "protected": false
-   }
-  ]
- },
- {
-  "source": "里奥",
-  "senses": [
-   {
-    "target": "ไลเอล",
-    "category": "Creature Species",
-    "confirmed": true,
-    "protected": false
-   },
-   {
-    "target": "ลีโอ",
+    "target": "Ms. Cyglace",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -207,13 +156,13 @@
   "source": "黄蜂后",
   "senses": [
    {
-    "target": "บัมเบล",
+    "target": "Bumbelle",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "บัซเซ็ตต์",
+    "target": "Buzzette",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -224,13 +173,13 @@
   "source": "毛毛",
   "senses": [
    {
-    "target": "ฟูฟู",
+    "target": "Poppet",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "มัฟฟิน",
+    "target": "Muffin",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -241,13 +190,13 @@
   "source": "小帕尔",
   "senses": [
    {
-    "target": "พาลีน",
+    "target": "Palyn",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "พาลี",
+    "target": "Paly",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -258,13 +207,13 @@
   "source": "龙息帕尔",
   "senses": [
    {
-    "target": "พาร์ลิกอน",
+    "target": "Parlygon",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "พาโร",
+    "target": "Parolyn",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -275,13 +224,13 @@
   "source": "吞噬",
   "senses": [
    {
-    "target": "เวลมอธ",
+    "target": "Velmoth",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "กลืนกิน",
+    "target": "Devour",
     "category": "Jini Combat System",
     "confirmed": true,
     "protected": false
@@ -292,13 +241,13 @@
   "source": "帕帕斯卡",
   "senses": [
    {
-    "target": "พาพาสโก",
+    "target": "Papasco",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "พาสโก",
+    "target": "Pasko",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -309,13 +258,13 @@
   "source": "呱呱",
   "senses": [
    {
-    "target": "ฮวาฮวา",
+    "target": "Huahua",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ฮวาฮาฮ่า",
+    "target": "Huahaha",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -326,13 +275,13 @@
   "source": "格斗小六",
   "senses": [
    {
-    "target": "พันชี่",
+    "target": "Hexivar",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "เจ้าหกนักสู้",
+    "target": "Punchy",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -343,13 +292,13 @@
   "source": "多多",
   "senses": [
    {
-    "target": "โดโดส",
+    "target": "Dodoze",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ดูปี้",
+    "target": "Doopy",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -360,13 +309,13 @@
   "source": "古啦多",
   "senses": [
    {
-    "target": "โกราโด",
+    "target": "Gorado",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ดร.โกราโด",
+    "target": "Dr. Gorado",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -377,13 +326,13 @@
   "source": "古路尼",
   "senses": [
    {
-    "target": "กูลูนี่",
+    "target": "Guluni\nGurreni",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "วิศวกรกูลูนี่",
+    "target": "Engineer Guluni",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
@@ -394,13 +343,13 @@
   "source": "裘卡",
   "senses": [
    {
-    "target": "เฟลแวร์",
+    "target": "Felvair",
     "category": "Creature Species",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ศาสตราจารย์เฟลวาร์ด",
+    "target": "Professor Felvard",
     "category": "Named NPC",
     "confirmed": true,
     "protected": false
@@ -411,13 +360,13 @@
   "source": "龙卷风",
   "senses": [
    {
-    "target": "เมลสตรอม",
+    "target": "Maelstrom",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ทอร์นาโด",
+    "target": "Tornado",
     "category": "Jini Combat System",
     "confirmed": true,
     "protected": false
@@ -428,13 +377,13 @@
   "source": "背包",
   "senses": [
    {
-    "target": "กระเป๋า",
+    "target": "Inventory",
     "category": "Gameplay System",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "กระเป๋าเสื้อผ้า",
+    "target": "Backpack",
     "category": "Cosmetics system",
     "confirmed": true,
     "protected": false
@@ -445,13 +394,13 @@
   "source": "花精灵",
   "senses": [
    {
-    "target": "จินนี่ดอกไม้",
+    "target": "Flora Jini",
     "category": "Creature Individual",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ภูตดอกไม้",
+    "target": "Flora Spirit",
     "category": "Jini Combat System",
     "confirmed": true,
     "protected": false
@@ -462,13 +411,13 @@
   "source": "不动如山",
   "senses": [
    {
-    "target": "แกร่งดั่งภูผา",
+    "target": "Unshaken",
     "category": "Jini Combat System",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "มั่นคงดั่งขุนเขา",
+    "target": "The Immovable",
     "category": "Title",
     "confirmed": true,
     "protected": false
@@ -479,13 +428,13 @@
   "source": "克制",
   "senses": [
    {
-    "target": "ชนะทาง",
+    "target": "has advantage over",
     "category": "Jini Combat System",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ข่ม",
+    "target": "Advantage",
     "category": "Jini Combat System",
     "confirmed": true,
     "protected": false
@@ -496,13 +445,13 @@
   "source": "双学科导师",
   "senses": [
    {
-    "target": "อาจารย์ญินวิทยาและการเล่นแร่แปรธาตุ",
+    "target": "Jiniology & Alchemy Professor",
     "category": "Title",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "อาจารย์สอนญินวิทยาและการเล่นแร่แปรธาตุ",
+    "target": "Professor of Jiniology and Alchemy",
     "category": "Title",
     "confirmed": true,
     "protected": false
@@ -513,13 +462,13 @@
   "source": "战斗学导师",
   "senses": [
    {
-    "target": "อาจารย์วิชาการต่อสู้",
+    "target": "Combat Studies Professor",
     "category": "Title",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "อาจารย์สอนวิชาการต่อสู้",
+    "target": "Professor of Combat Studies",
     "category": "Title",
     "confirmed": true,
     "protected": false
@@ -530,14 +479,31 @@
   "source": "仪典学导师",
   "senses": [
    {
-    "target": "อาจารย์วิชาพิธีการ",
+    "target": "Ritual Studies Professor",
     "category": "Title",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "อาจารย์สอนวิชาพิธีการ",
+    "target": "Professor of Ritual Studies",
     "category": "Title",
+    "confirmed": true,
+    "protected": false
+   }
+  ]
+ },
+ {
+  "source": "捕捉",
+  "senses": [
+   {
+    "target": "Capture",
+    "category": "Overworld Special Mechanics",
+    "confirmed": true,
+    "protected": false
+   },
+   {
+    "target": "Catch",
+    "category": "Overworld Special Mechanics",
     "confirmed": true,
     "protected": false
    }
@@ -547,13 +513,13 @@
   "source": "骑乘",
   "senses": [
    {
-    "target": "ขี่",
+    "target": "Ride",
     "category": "Overworld Exploration Abilities",
     "confirmed": true,
     "protected": false
    },
    {
-    "target": "ขึ้นขี่",
+    "target": "Mount",
     "category": "Overworld Exploration Abilities",
     "confirmed": true,
     "protected": false

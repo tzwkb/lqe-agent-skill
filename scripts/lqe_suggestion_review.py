@@ -30,18 +30,20 @@ from lqe_suggestions import (
     _suggestion_verifier_instruction_input,
     _load_live,
     _publisher_receipt,
+    _review_packet_worker_receipts,
     _validate_publisher_receipt,
     _validate_schema,
     _validate_self_digest,
     _with_digest,
     _worker_receipt,
     build_suggestion_review_packet,
-    enforce_suggestion_worker_budget,
+    measure_suggestion_worker_input,
     require_persisted_packet_plan,
     validate_candidate_artifact,
     validate_suggestion_artifact,
 )
 from lqe_split_contract import canonical_digest
+from lqe_target_form import load_target_form_policy
 
 
 REVIEW_PACKET_NAME = "suggestion_review.packet.json"
@@ -49,6 +51,7 @@ REVIEW_DRAFT_NAME = "suggestion_review.draft.json"
 REVIEW_ARTIFACT_NAME = "suggestion_review.json"
 REVIEW_CONTEXT_DIR = "suggestion_review_context"
 REVIEW_BATCH_PLAN_NAME = "batch_plan.json"
+REVIEW_INPUT_MEASUREMENT_NAME = "input_measurement.json"
 
 
 def build_review_packet(
@@ -73,16 +76,28 @@ def validate_review_packet(
     _validate_self_digest(packet, "packet_digest", "suggestion review packet")
     if packet["candidate_artifact_digest"] != candidate_artifact["artifact_digest"]:
         raise ValueError("suggestion review packet candidate artifact is stale")
-    if packet["generation_worker_receipts"] != candidate_artifact[
+    expected_generation_receipts = candidate_artifact[
         "generation_worker_receipts"
-    ]:
+    ]
+    expected_checker_receipts = candidate_artifact.get(
+        "checker_worker_receipts"
+    )
+    if generation_packet is not None:
+        (
+            expected_generation_receipts,
+            expected_checker_receipts,
+        ) = _review_packet_worker_receipts(
+            generation_packet,
+            candidate_artifact,
+        )
+    if packet["generation_worker_receipts"] != expected_generation_receipts:
         raise ValueError("suggestion review packet generation worker is stale")
     if "selected_evidence_index" in candidate_artifact:
         if (
             packet.get("selected_evidence_index")
             != candidate_artifact["selected_evidence_index"]
             or packet.get("checker_worker_receipts")
-            != candidate_artifact["checker_worker_receipts"]
+            != expected_checker_receipts
         ):
             raise ValueError("suggestion review packet selected evidence is stale")
         if generation_packet is not None and (
@@ -575,14 +590,15 @@ def _review_packet_input_bytes(
     if relative.is_absolute() or ".." in relative.parts:
         raise ValueError("suggestion verifier content index path is unsafe")
     content_index = read_json(job / relative)
-    return enforce_suggestion_worker_budget(
+    verifier_summary, verifier_instructions = _suggestion_verifier_instruction_input()
+    if verifier_summary != packet["instructions"]["verifier_instructions"]:
+        raise ValueError("suggestion verifier instructions are stale")
+    return measure_suggestion_worker_input(
         generation_batch["worker_manifest"],
+        generation_batch["bundle_set"],
         packet,
         label="suggestion verifier",
-        additional_raw_bytes=(
-            packet["instructions"]["verifier_instructions"]["bytes"]
-            + _canonical_size(content_index)
-        ),
+        additional_inputs=[content_index, verifier_instructions],
     )
 
 
@@ -598,7 +614,6 @@ def _build_review_packet_plan(
     ]
     review_batches = []
     batch_records = []
-    review_index = 0
     for generation_batch in generation_plan["batches"]:
         generation_ids = {
             segment["id"] for segment in generation_batch["packet"]["segments"]
@@ -608,82 +623,31 @@ def _build_review_packet_plan(
             for segment_id in independent_ids
             if segment_id in generation_ids
         ]
-        current: list[int] = []
-        for segment_id in pending:
-            trial = [*current, segment_id]
-            packet = build_review_packet(
-                generation_batch["packet"],
-                candidate,
-                included_review_ids=set(trial),
-            )
-            try:
-                _review_packet_input_bytes(job, generation_batch, packet)
-            except ValueError as exc:
-                if "exceeding budget" not in str(exc):
-                    raise
-                if not current:
-                    raise ValueError(
-                        f"suggestion verifier segment {segment_id} is an indivisible "
-                        "worker input exceeding budget 100000"
-                    ) from exc
-                review_index += 1
-                batch_id = f"batch_{review_index:04d}"
-                finalized = build_review_packet(
-                    generation_batch["packet"],
-                    candidate,
-                    included_review_ids=set(current),
-                )
-                measured = _review_packet_input_bytes(
-                    job, generation_batch, finalized
-                )
-                review_batches.append({
-                    "batch_id": batch_id,
-                    "generation_batch_id": generation_batch["batch_id"],
-                    "packet": finalized,
-                    "generation_batch": generation_batch,
-                })
-                batch_records.append({
-                    "batch_id": batch_id,
-                    "generation_batch_id": generation_batch["batch_id"],
-                    "reviewed_ids": copy.deepcopy(current),
-                    "packet_path": f"{REVIEW_CONTEXT_DIR}/{batch_id}/packet.json",
-                    "packet_digest": finalized["packet_digest"],
-                    "draft_path": f"{REVIEW_CONTEXT_DIR}/{batch_id}/review.draft.json",
-                    "worker_input_bytes": measured,
-                })
-                current = [segment_id]
-                single = build_review_packet(
-                    generation_batch["packet"],
-                    candidate,
-                    included_review_ids={segment_id},
-                )
-                _review_packet_input_bytes(job, generation_batch, single)
-            else:
-                current = trial
-        if current:
-            review_index += 1
-            batch_id = f"batch_{review_index:04d}"
-            packet = build_review_packet(
-                generation_batch["packet"],
-                candidate,
-                included_review_ids=set(current),
-            )
-            measured = _review_packet_input_bytes(job, generation_batch, packet)
-            review_batches.append({
-                "batch_id": batch_id,
-                "generation_batch_id": generation_batch["batch_id"],
-                "packet": packet,
-                "generation_batch": generation_batch,
-            })
-            batch_records.append({
-                "batch_id": batch_id,
-                "generation_batch_id": generation_batch["batch_id"],
-                "reviewed_ids": copy.deepcopy(current),
-                "packet_path": f"{REVIEW_CONTEXT_DIR}/{batch_id}/packet.json",
-                "packet_digest": packet["packet_digest"],
-                "draft_path": f"{REVIEW_CONTEXT_DIR}/{batch_id}/review.draft.json",
-                "worker_input_bytes": measured,
-            })
+        if not pending:
+            continue
+        batch_id = f"batch_{len(review_batches) + 1:04d}"
+        packet = build_review_packet(
+            generation_batch["packet"],
+            candidate,
+            included_review_ids=set(pending),
+        )
+        measured = _review_packet_input_bytes(job, generation_batch, packet)
+        review_batches.append({
+            "batch_id": batch_id,
+            "generation_batch_id": generation_batch["batch_id"],
+            "packet": packet,
+            "generation_batch": generation_batch,
+            "worker_input_bytes": measured,
+        })
+        batch_records.append({
+            "batch_id": batch_id,
+            "generation_batch_id": generation_batch["batch_id"],
+            "reviewed_ids": copy.deepcopy(pending),
+            "packet_path": f"{REVIEW_CONTEXT_DIR}/{batch_id}/packet.json",
+            "packet_digest": packet["packet_digest"],
+            "draft_path": f"{REVIEW_CONTEXT_DIR}/{batch_id}/review.draft.json",
+            "worker_input_bytes": measured,
+        })
 
     covered = [
         segment_id
@@ -784,6 +748,9 @@ def _build_review_packet_plan(
             "verify_confirmed_constraints": True,
             "verifier_instructions": _suggestion_verifier_instruction_input()[0],
             "worker_context": {
+                "input_measurement_path": (
+                    f"{REVIEW_CONTEXT_DIR}/{REVIEW_INPUT_MEASUREMENT_NAME}"
+                ),
                 "batch_plan_path": f"{REVIEW_CONTEXT_DIR}/{REVIEW_BATCH_PLAN_NAME}",
                 "batch_plan_digest": plan["batch_plan_digest"],
                 "same_evidence_as_generation": True,
@@ -813,7 +780,32 @@ def _build_review_packet_plan(
     }
 
 
+def _review_input_measurement(review_plan: dict) -> dict:
+    batches = [{
+        "batch_id": batch["batch_id"],
+        "generation_batch_id": batch["generation_batch_id"],
+        "reviewed_ids": copy.deepcopy(batch["packet"]["reviewed_ids"]),
+        "worker_input_bytes": batch["worker_input_bytes"],
+    } for batch in review_plan["batches"]]
+    values = [batch["worker_input_bytes"] for batch in batches]
+    payload = {
+        "schema": "lqe.suggestion-review-worker-input-measurement",
+        "version": 1,
+        "mode": "advisory",
+        "decision_owner": "main_agent",
+        "batches": batches,
+        "total_worker_input_bytes": sum(values),
+        "largest_worker_input_bytes": max(values, default=0),
+    }
+    payload["measurement_digest"] = canonical_digest(payload)
+    return payload
+
+
 def _write_review_packet_plan(job: Path, plan: dict) -> None:
+    write_json_atomic(
+        job / REVIEW_CONTEXT_DIR / REVIEW_INPUT_MEASUREMENT_NAME,
+        _review_input_measurement(plan),
+    )
     if plan["mode"] == "batched":
         write_json_atomic(
             job / REVIEW_CONTEXT_DIR / REVIEW_BATCH_PLAN_NAME,
@@ -827,6 +819,14 @@ def _write_review_packet_plan(job: Path, plan: dict) -> None:
 
 
 def _require_persisted_review_packet_plan(job: Path, plan: dict) -> None:
+    measurement_path = (
+        job / REVIEW_CONTEXT_DIR / REVIEW_INPUT_MEASUREMENT_NAME
+    )
+    if (
+        not measurement_path.is_file()
+        or read_json(measurement_path) != _review_input_measurement(plan)
+    ):
+        raise ValueError("prepared suggestion review input measurement is stale")
     if plan["mode"] == "single":
         return
     plan_path = job / REVIEW_CONTEXT_DIR / REVIEW_BATCH_PLAN_NAME
@@ -862,7 +862,12 @@ def _load_live_chain_plan(
     )
     require_persisted_packet_plan(job, generation_plan)
     generation_packet = generation_plan["root_packet"]
-    validate_candidate_artifact(candidate, generation_packet, segments)
+    validate_candidate_artifact(
+        candidate,
+        generation_packet,
+        segments,
+        target_form_policy=load_target_form_policy(state),
+    )
     review_plan = _build_review_packet_plan(job, generation_plan, candidate)
     return (
         state,
@@ -894,7 +899,7 @@ def _load_live_chain(
 def cmd_prepare(args) -> None:
     job = Path(args.job).resolve()
     (
-        _,
+        state,
         _,
         generation_packet,
         candidate,
@@ -910,10 +915,13 @@ def cmd_prepare(args) -> None:
     output = Path(args.out) if args.out else job / REVIEW_PACKET_NAME
     _write_review_packet_plan(job, review_plan)
     write_json_atomic(output, packet)
+    measurement = _review_input_measurement(review_plan)
     print(
         f"[lqe_suggestion_review] Review packet → {output} "
         f"({len(packet['reviewed_ids'])} independent candidate(s), "
-        f"{len(review_plan['batches'])} worker batch(es))"
+        f"{len(review_plan['batches'])} worker batch(es), "
+        f"largest measured {measurement['largest_worker_input_bytes']} bytes, "
+        f"total {measurement['total_worker_input_bytes']} bytes; advisory)"
     )
 
 
@@ -966,7 +974,7 @@ def cmd_publish_review(args) -> None:
 def cmd_publish_final(args) -> None:
     job = Path(args.job).resolve()
     (
-        _,
+        state,
         segments,
         generation_packet,
         candidate,
@@ -994,6 +1002,7 @@ def cmd_publish_final(args) -> None:
         candidate_artifact=candidate,
         review_artifact=review,
         review_packet=review_packet,
+        target_form_policy=load_target_form_policy(state),
     )
     output = Path(args.out) if args.out else job / ARTIFACT_NAME
     write_json_atomic(output, artifact)

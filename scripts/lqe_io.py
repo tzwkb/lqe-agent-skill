@@ -56,6 +56,7 @@ from lqe_corrections import (
     validate_error_history_term_contract,
     verify_results,
 )
+from lqe_target_form import load_target_form_policy
 from lqe_inputs import (
     SDLXLIFFImportError,
     XLSImportError,
@@ -3863,6 +3864,7 @@ def _cmd_build_results_locked(args, state_path: Path, state: dict):
         segments,
         entries,
         review_policy=get_review_policy(state),
+        target_form_policy=load_target_form_policy(state),
     )
     if requires_bound_artifacts(state):
         raise SystemExit(
@@ -5925,6 +5927,7 @@ def _verify_result_payload_with_segments(
             allow_internal_provenance=bound,
             require_internal_provenance=bound,
             review_policy=get_review_policy(state),
+            target_form_policy=load_target_form_policy(state),
         )
     except (CheckFormatError, OSError, ValueError) as exc:
         raise SystemExit(f"[{command}] {exc}") from exc

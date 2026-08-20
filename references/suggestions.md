@@ -4,6 +4,8 @@
 
 输入是 `lqe.reference-suggestion-generation-packet` v5。单批时读取 `reference_suggestions.packet.json`；若根 packet 带 `batch_plan`，根 packet 只供本地汇总，每个新 worker 只读取计划列出的一个 `packet.json`，并把草稿写到该批 `draft_path`。不得合并、遗漏或截断批次。
 
+主 Agent在派发前已经读取 `suggestion_context/input_measurement.json` 并作出本轮批次判断。该文件的 bytes 只作 advisory 实测，不是 worker 自行套用的接受阈值；不得因输入较大而省略或截断资料。
+
 开始前必须读取 packet 中 `instructions.worker_context` 指向的：
 
 - `worker_manifest.json`；

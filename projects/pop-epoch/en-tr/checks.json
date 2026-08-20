@@ -1,0 +1,19 @@
+{
+  "builtin": {
+    "em_dash": false,
+    "locale_numbers": false,
+    "cn_numbers": false,
+    "pinyin_residue": false,
+    "fullwidth_punct": false
+  },
+  "custom": [
+    {
+      "id": "tr-cjk-punctuation",
+      "pattern": "[，。！？；：、（）【】《》「」『』　]",
+      "where": "target",
+      "category": "Punctuation",
+      "severity": "Minor",
+      "comment": "Non-Turkish full-width punctuation found"
+    }
+  ]
+}

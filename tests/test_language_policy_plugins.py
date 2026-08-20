@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 import sys
 import unittest
@@ -21,6 +22,10 @@ from lqe_language_policies import (
 
 
 PROVIDER = {"id": "ko.register", "api_version": 1}
+PROVIDER_V2 = {"id": "ko.register", "api_version": 2}
+V1_MODULE_SHA256 = (
+    "06e9317c486ccafd4e489a607c36e54d3584180af4f8fcba3f6bbef0341ef8ef"
+)
 
 
 def context_rules(expect=None):
@@ -56,14 +61,55 @@ def context_rules(expect=None):
 
 
 CONTEXT = {"speaker_id": "operator", "addressee_ids": ["supervisor"]}
+NARRATION_CONTEXT = {"content_type": "story_narration"}
+
+
+def narration_context_rules(expect=None):
+    return {
+        "schema": "lqe.context-rules",
+        "version": 1,
+        "authority_rank": ["client", "language_lead", "pm"],
+        "rules": [
+            {
+                "id": "register.story_narration.client",
+                "capability": "language.register",
+                "provider": PROVIDER_V2,
+                "target_lang": "ko",
+                "rule_status": "confirmed",
+                "priority": 100,
+                "authority": {"issuer": "client"},
+                "valid_from": None,
+                "valid_until": None,
+                "when": {"content_type": ["story_narration"]},
+                "expect": expect
+                if expect is not None
+                else {
+                    "person": ["second"],
+                    "tense": ["past"],
+                    "politeness": ["formal_polite"],
+                    "ending_families": ["hapsyo"],
+                },
+                "provenance": {"source_id": "confirmed-client-note"},
+            }
+        ],
+    }
 
 
 class LanguagePolicyPluginTests(unittest.TestCase):
     def test_registry_is_fixed_and_target_filtered_without_module_paths(self):
         registry = trusted_provider_registry()
 
-        self.assertEqual(set(registry), {"ko.register@1"})
+        self.assertEqual(set(registry), {"ko.register@1", "ko.register@2"})
         self.assertNotIn("module_path", registry["ko.register@1"])
+        self.assertNotIn("module_path", registry["ko.register@2"])
+        self.assertEqual(
+            registry["ko.register@1"]["module_sha256"],
+            V1_MODULE_SHA256,
+        )
+        self.assertEqual(
+            provider_for("ko", "language.register")["api_version"],
+            1,
+        )
         self.assertEqual(trusted_provider_registry(target_lang="en"), {})
         self.assertEqual(trusted_provider_registry(target_lang="th"), {})
         self.assertIsNone(provider_for("en", "language.register"))
@@ -100,6 +146,8 @@ class LanguagePolicyPluginTests(unittest.TestCase):
 
         self.assertEqual(normalized["politeness"], ["plain"])
         self.assertEqual(normalized["ending_families"], ["hae"])
+        with self.assertRaisesRegex(ValueError, "unknown fields"):
+            validate_policy(PROVIDER, "ko", {"person": ["second"]})
 
         with self.assertRaisesRegex(ValueError, "unknown fields"):
             resolve_language_policy(
@@ -147,6 +195,77 @@ class LanguagePolicyPluginTests(unittest.TestCase):
         self.assertEqual(mismatch["status"], "mismatch")
         self.assertIn(
             "forbidden_ending_family", mismatch["evaluation"]["reason_codes"]
+        )
+
+    def test_v2_narration_scope_and_authority_are_enforced(self):
+        rules = narration_context_rules()
+        lower_authority = deepcopy(rules["rules"][0])
+        lower_authority["id"] = "register.story_narration.pm"
+        lower_authority["authority"] = {"issuer": "pm"}
+        lower_authority["priority"] = 999
+        lower_authority["expect"] = {"person": ["first"], "tense": ["present"]}
+        rules["rules"].append(lower_authority)
+
+        resolved = resolve_language_policy(
+            rules,
+            NARRATION_CONTEXT,
+            provider=PROVIDER_V2,
+            target_lang="ko",
+            as_of="2026-08-13",
+        )
+        outside_scope = resolve_language_policy(
+            rules,
+            {"content_type": "dialogue"},
+            provider=PROVIDER_V2,
+            target_lang="ko",
+            as_of="2026-08-13",
+        )
+        matching = evaluate_language_policy(
+            rules,
+            NARRATION_CONTEXT,
+            "당신은 문을 열었습니다.",
+            provider=PROVIDER_V2,
+            target_lang="ko",
+            as_of="2026-08-13",
+        )
+
+        self.assertEqual(resolved["status"], "resolved")
+        self.assertEqual(
+            resolved["rule_ids"],
+            ["register.story_narration.client"],
+        )
+        self.assertEqual(resolved["expected"]["person"], ["second"])
+        self.assertEqual(resolved["expected"]["tense"], ["past"])
+        self.assertEqual(outside_scope["status"], "insufficient_context")
+        self.assertEqual(matching["status"], "match")
+        self.assertEqual(
+            evaluate_resolved_constraint(
+                resolved,
+                "당신은 문을 열었습니다.",
+            )["status"],
+            "match",
+        )
+
+    def test_v2_equal_tier_conflict_fails_closed(self):
+        rules = narration_context_rules()
+        conflicting = deepcopy(rules["rules"][0])
+        conflicting["id"] = "register.story_narration.conflict"
+        conflicting["expect"] = {"person": ["first"], "tense": ["present"]}
+        rules["rules"].append(conflicting)
+
+        result = resolve_language_policy(
+            rules,
+            NARRATION_CONTEXT,
+            provider=PROVIDER_V2,
+            target_lang="ko",
+            as_of="2026-08-13",
+        )
+
+        self.assertEqual(result["status"], "conflict")
+        self.assertIsNone(result["expected"])
+        self.assertIn(
+            "equal_rank_conflicting_expectations",
+            result["reason_codes"],
         )
 
     def test_observe_dispatcher_does_not_claim_a_result_for_ambiguous_text(self):
