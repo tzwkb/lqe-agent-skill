@@ -1,5 +1,40 @@
 [
  {
+  "source": "洛克王国：世界",
+  "target": "Roco Kingdom",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "洛克王国",
+  "senses": [
+   {
+    "target": "อาณาจักรโรโค",
+    "confirmed": true,
+    "protected": false,
+    "category": "Administrative Region"
+   },
+   {
+    "target": "Roco Kingdom",
+    "confirmed": true,
+    "protected": false,
+    "category": "Core Lore"
+   }
+  ]
+ },
+ {
+  "source": "洛克",
+  "target": "โรโค",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵",
+  "target": "จินนี่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
   "source": "马尔文",
   "target": "มาร์วิน",
   "confirmed": true,
@@ -145,9 +180,20 @@
  },
  {
   "source": "嫉妒",
-  "target": "เอนวี่",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "เอนวี่",
+    "confirmed": true,
+    "protected": false,
+    "category": "Named NPC"
+   },
+   {
+    "target": "ริษยา",
+    "confirmed": true,
+    "protected": false,
+    "category": "Jini Combat System"
+   }
+  ]
  },
  {
   "source": "安妮",
@@ -637,7 +683,7 @@
  },
  {
   "source": "莫利亚克",
-  "target": "โมริแอค",
+  "target": "เมาริแอค",
   "confirmed": true,
   "protected": false
  },
@@ -1315,7 +1361,7 @@
  },
  {
   "source": "精灵学分院代表",
-  "target": "ตัวแทนสำนักวิชาภูต",
+  "target": "ตัวแทนสำนักวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -1339,7 +1385,7 @@
  },
  {
   "source": "精灵学学姐",
-  "target": "รุ่นพี่วิชาภูตวิทยา",
+  "target": "รุ่นพี่วิชาจินนี่วิทยา",
   "confirmed": true,
   "protected": false
  },
@@ -1783,7 +1829,7 @@
  },
  {
   "source": "感慨的精灵学者",
-  "target": "นักวิชาการภูตช่างรำพึงรำพัน",
+  "target": "นักวิชาการจินนี่ช่างรำพึงรำพัน",
   "confirmed": true,
   "protected": false
  },
@@ -1849,7 +1895,7 @@
  },
  {
   "source": "精灵学分院学生",
-  "target": "นักเรียนสำนักวิชาภูต",
+  "target": "นักเรียนสำนักวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -2041,13 +2087,13 @@
  },
  {
   "source": "精灵爱好者",
-  "target": "นักสะสมภูต",
+  "target": "นักสะสมจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵研究员",
-  "target": "นักวิจัยภูต",
+  "target": "นักวิจัยจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -2143,7 +2189,7 @@
  },
  {
   "source": "诱捕精灵的监视者",
-  "target": "ผู้คุมที่ล่อลวงภูตมาติดกับ",
+  "target": "ผู้คุมที่ล่อลวงจินนี่มาติดกับ",
   "confirmed": true,
   "protected": false
  },
@@ -2233,9 +2279,20 @@
  },
  {
   "source": "噜噜",
-  "target": "ฮูลู",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "ฮูลู",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "มิสเตอร์ฮูลู",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "蜜蜂们",
@@ -2245,7 +2302,7 @@
  },
  {
   "source": "机械系精灵们",
-  "target": "เหล่าภูตธาตุจักรกล",
+  "target": "เหล่าจินนี่ธาตุจักรกล",
   "confirmed": true,
   "protected": false
  },
@@ -2265,18 +2322,16 @@
   "source": "翼龙",
   "senses": [
    {
+    "target": "เซฟี",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   },
+   {
     "target": "เทอริล",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "风翼之龙的昵称"
-   },
-   {
-    "target": "เทโรซอร์",
-    "confirmed": true,
-    "protected": false,
-    "category": "Creature Species",
-    "definition": "J0724 2/2"
+    "category": "Creature Species"
    }
   ]
  },
@@ -2305,23 +2360,32 @@
     "target": "เทมพี",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "风暴之龙的昵称"
+    "category": "Creature Individual"
    },
    {
     "target": "อีลาน",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "三龙传说中的风暴之龙"
+    "category": "Creature Individual"
    }
   ]
  },
  {
   "source": "机械精灵",
-  "target": "ภูตจักรกล",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "เฟอร์โร",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   },
+   {
+    "target": "จินนี่จักรกล",
+    "confirmed": true,
+    "protected": false,
+    "category": "Core Lore"
+   }
+  ]
  },
  {
   "source": "小遁鼠",
@@ -2355,13 +2419,13 @@
  },
  {
   "source": "圣水迪莫",
-  "target": "ไฮดิโม",
+  "target": "ไฮดีโม",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "圣火迪莫",
-  "target": "อาร์ดิโม",
+  "target": "อาร์ดีโม",
   "confirmed": true,
   "protected": false
  },
@@ -2511,13 +2575,13 @@
  },
  {
   "source": "艾米",
-  "target": "อามี",
+  "target": "เอ็มมี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "星光艾米",
-  "target": "อามิโนวา",
+  "target": "เอมิโนวา",
   "confirmed": true,
   "protected": false
  },
@@ -2553,9 +2617,20 @@
  },
  {
   "source": "松仔",
-  "target": "โคนี่",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "โคนี่ย์",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "โคนี่",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "松叶羊",
@@ -2678,15 +2753,13 @@
     "target": "มอสซิป",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0055 1/2\n它头顶长着一团蓬松的绿色苔藓，压低身体时能很好地融入草丛，几乎难以分辨。苔藓本身不疏水，一旦沾到水就会迅速吸收并变得沉重，让它行动迟缓甚至走不动，只能停在原地等待自然风干。它的身体像果冻一样具有弹性，可拉伸变形。"
+    "category": "Creature Species"
    },
    {
-    "target": "อีเบย์",
+    "target": "ไอเบอร์รี",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "伊贝儿（个体）\n受害者大多是被甩上岸，有明确伤痕的只有被叫做伊贝儿的精灵，它们的果冻般的毛发残缺不全。"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -3075,15 +3148,13 @@
     "target": "สโครลลาร์ด",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0119 2/3\n身上带着书本和油墨的味道，看起来小小的，其实比想象中重很多。常与同伴交换藏书，偶尔遇到疑惑的地方，会用书使劲砸自己的头，希望用这种办法让知识快点进入身体。"
+    "category": "Creature Species"
    },
    {
     "target": "ผู้พิทักษ์คัมภีร์",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "书卷守护（个体）\n生态园水族馆打卡剧情中给主角出题的精灵"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -3989,7 +4060,7 @@
  },
  {
   "source": "水枝枝",
-  "target": "คอรัลกา",
+  "target": "คอรัลก้า",
   "confirmed": true,
   "protected": false
  },
@@ -4636,15 +4707,13 @@
     "target": "คากู",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0381 1/3\n跑得很快，手短且柔软，一般用尾巴来代替手的作用。尝试助跑之后短暂地浮空，但似乎一直没能学会飞翔。"
+    "category": "Creature Species"
    },
    {
-    "target": "ขนนกกาก้า",
+    "target": "เชอร์พี",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "咔咔羽毛（个体）\n在雪地玩着玩着就吃起雪来的咔咔羽毛"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -4679,15 +4748,13 @@
     "target": "ไซเกลซ",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0386 3/3\n柔弱温顺，羽毛软而蓬松。过于专注梳理羽毛可能会迷路，意识到迷路的时候通常已经游到了完全不认识的环境里。不过总能保持优雅淡定，似乎永远不会慌张惊恐。这或许是夫人为自己制定的礼仪规范。"
+    "category": "Creature Species"
    },
    {
-    "target": "มาดามสีมรกต",
+    "target": "มาดามไซเกลซ",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "翠顶夫人（个体）\n奥利芙老师救助的那只翠顶夫人，向主角请求帮助，后来发现是想要找宫廷魔法师用魔法治疗奥利芙老师的伤病"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -4722,15 +4789,13 @@
     "target": "ไลเอล",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0391 1/3\n有着圆滚滚的身躯，小小的翅膀还无法熟练飞翔，却能和愿力发生共鸣，从而获得力量。“和伙伴在一起的安全感连美食都不能替代。即使有时候像个小跟屁虫也无所谓。”"
+    "category": "Creature Species"
    },
    {
     "target": "ลีโอ",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "翼王里奥。避免Leo之类会联想到狮子的名字。另外有个精灵的物种和翼王里奥重名了，中文可能要改。注意区分。"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -4909,15 +4974,13 @@
     "target": "บัมเบล",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0420 2/3\n在蜂后的下半身周围有能量波动，推测是用来建立两只小蜂的联系。战斗时，蜂后的两眼会变成红色，针刺也会变得锋利无比。"
+    "category": "Creature Species"
    },
    {
-    "target": "นางพญาผึ้ง",
+    "target": "บัซเซ็ตต์",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "黄蜂后（个体）\n询问主角有没有照顾蜜蜂宝宝们所需要的物品，最终赠予主角「甜蜜蜜」"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -5001,9 +5064,20 @@
  },
  {
   "source": "毛毛",
-  "target": "ฟูฟู",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "ฟูฟู",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "มัฟฟิน",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "爬爬",
@@ -5241,9 +5315,20 @@
  },
  {
   "source": "小帕尔",
-  "target": "พาร์ล",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "พาลีน",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "พาลี",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "帕尔萨斯",
@@ -5253,9 +5338,20 @@
  },
  {
   "source": "龙息帕尔",
-  "target": "ดราก้อนพาร์ล",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "พาร์ลิกอน",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "พาโร",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "瑰眼仔",
@@ -5882,15 +5978,13 @@
     "target": "เวลมอธ",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0581 2/2"
+    "category": "Creature Species"
    },
    {
     "target": "กลืนกิน",
     "confirmed": true,
     "protected": false,
-    "category": "Jini Combat System",
-    "definition": "造成物伤，若使用本技能击败敌方，回复6能量。（技能名，不是精灵名）"
+    "category": "Jini Combat System"
    }
   ]
  },
@@ -6543,15 +6637,13 @@
     "target": "พาพาสโก",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0689 2/2\n在机械系精灵中非常有声望。曾经制造出帕帕斯卡的洛克许下一个愿望，希望能让机械系精灵有尊严地活着。于是帕帕斯卡整个种族一直在想办法让机械系精灵过上更体面更开心的生活。"
+    "category": "Creature Species"
    },
    {
     "target": "พาสโก",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "帕帕斯卡（个体）\n伊莱克当年放在彼得大道的那只机械精灵，以前叫帕帕"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -6871,18 +6963,16 @@
   "source": "呱呱",
   "senses": [
    {
-    "target": "บันนี่",
+    "target": "ฮวาฮวา",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0743 1/1"
+    "category": "Creature Species"
    },
    {
-    "target": "ก๊าบก๊าบ",
+    "target": "ฮวาฮาฮ่า",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "呱呱（个体）\n路易斯让主角成为呱呱的魔法学院向导。在老家看过很多书，来魔法学院主要是为了交流知识的。"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -6926,18 +7016,16 @@
   "source": "格斗小六",
   "senses": [
    {
-    "target": "เฮกซิวาร์",
+    "target": "พันชี่",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0750 1/1\n掌力十足，岩石上常常出现它们的掌印。研究员根据其攻击招式，改编了一套能够强身健体的健体操，在学院中曾挂起过一阵不小的习武之风。"
+    "category": "Creature Species"
    },
    {
     "target": "เจ้าหกนักสู้",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "格斗小六（个体）\n奉希露德命令守在竞技场门口的精灵"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -7369,9 +7457,20 @@
  },
  {
   "source": "多多",
-  "target": "โตโต้",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "โดโดส",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "ดูปี้",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "多啦多",
@@ -7381,9 +7480,20 @@
  },
  {
   "source": "古啦多",
-  "target": "โกราโด",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "โกราโด",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Species"
+   },
+   {
+    "target": "ดร.โกราโด",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   }
+  ]
  },
  {
   "source": "路路",
@@ -7404,15 +7514,13 @@
     "target": "กูลูนี่",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0829 3/3"
+    "category": "Creature Species"
    },
    {
-    "target": "กูลูนี",
+    "target": "วิศวกรกูลูนี่",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Individual",
-    "definition": "古路尼（个体）\n古路尼 就是 那只精灵古路尼，这里直接用作了他的名字。是月兔酒馆五位元老之一的——工程师。\n他严肃刻板，非常关心手底下的工匠，但嘴上从来不说。\n秩序感很强，酒馆首领斯诺克收留吸血鬼，他就容纳了许多吸血鬼做帮工。\n行事手段传统，为了缓解吸血鬼的痛楚，他愿意用玩家提供的苦味料理让手下“忆苦思甜"
+    "category": "Creature Individual"
    }
   ]
  },
@@ -7525,15 +7633,13 @@
     "target": "เฟลแวร์",
     "confirmed": true,
     "protected": false,
-    "category": "Creature Species",
-    "definition": "J0847 3/3\n独自活动，高傲而优雅的生物。一生中只选择一只伴侣。据研究表明裘卡的体液都有剧毒，紧张时脚垫会分泌汗液，在地面上留下有剧毒的梅花形汗渍。"
+    "category": "Creature Species"
    },
    {
-    "target": "เฟลวาร์ด",
+    "target": "ศาสตราจารย์เฟลวาร์ด",
     "confirmed": true,
     "protected": false,
-    "category": "Named NPC",
-    "definition": "老师，也是裘卡（个体）\n仪典学导师，学院司仪"
+    "category": "Named NPC"
    }
   ]
  },
@@ -7737,7 +7843,7 @@
  },
  {
   "source": "粉星仔",
-  "target": "สตาร์บิต",
+  "target": "แอสโตรบัน",
   "confirmed": true,
   "protected": false
  },
@@ -8133,7 +8239,7 @@
  },
  {
   "source": "玩耍的精灵",
-  "target": "ภูตที่กำลังเล่นสนุก",
+  "target": "จินนี่ที่กำลังเล่นสนุก",
   "confirmed": true,
   "protected": false
  },
@@ -8175,7 +8281,7 @@
  },
  {
   "source": "担忧的机械精灵",
-  "target": "ภูตจักรกลที่กังวลใจ",
+  "target": "จินนี่จักรกลที่กังวลใจ",
   "confirmed": true,
   "protected": false
  },
@@ -8319,9 +8425,20 @@
  },
  {
   "source": "龙卷风",
-  "target": "ทอร์นาโด",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "เมลสตรอม",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   },
+   {
+    "target": "ทอร์นาโด",
+    "confirmed": true,
+    "protected": false,
+    "category": "Jini Combat System"
+   }
+  ]
  },
  {
   "source": "小咪",
@@ -8427,7 +8544,7 @@
  },
  {
   "source": "精灵育成小贴士",
-  "target": "เคล็ดลับการเลี้ยงภูต",
+  "target": "เคล็ดลับการเลี้ยงจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -8486,18 +8603,6 @@
   "protected": false
  },
  {
-  "source": "精灵",
-  "target": "ภูต",
-  "confirmed": true,
-  "protected": false
- },
- {
-  "source": "洛克",
-  "target": "โรโค",
-  "confirmed": true,
-  "protected": false
- },
- {
   "source": "契约",
   "target": "พันธสัญญา",
   "confirmed": true,
@@ -8529,7 +8634,7 @@
  },
  {
   "source": "精灵技能",
-  "target": "สกิลภูต",
+  "target": "สกิลจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -8541,7 +8646,7 @@
  },
  {
   "source": "精灵对决",
-  "target": "ศึกดวลภูต",
+  "target": "ศึกดวลจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -8865,7 +8970,7 @@
  },
  {
   "source": "精灵杂货店",
-  "target": "ร้านค้าภูต",
+  "target": "ร้านค้าจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -8985,13 +9090,13 @@
  },
  {
   "source": "传说精灵",
-  "target": "ภูตในตำนาน",
+  "target": "จินนี่ในตำนาน",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "通行证精灵",
-  "target": "พาสภูต",
+  "target": "พาสจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -9003,7 +9108,7 @@
  },
  {
   "source": "奇遇精灵",
-  "target": "ภูตเซอร์ไพรส์",
+  "target": "จินนี่เซอร์ไพรส์",
   "confirmed": true,
   "protected": false
  },
@@ -9015,7 +9120,7 @@
  },
  {
   "source": "异色精灵",
-  "target": "ภูตสีพิเศษ",
+  "target": "จินนี่สีพิเศษ",
   "confirmed": true,
   "protected": false
  },
@@ -9057,7 +9162,7 @@
  },
  {
   "source": "精灵学分院",
-  "target": "สำนักวิชาภูต",
+  "target": "สำนักวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -9150,25 +9255,6 @@
   "target": "ซากโบราณริมทะเล",
   "confirmed": true,
   "protected": false
- },
- {
-  "source": "洛克王国",
-  "senses": [
-   {
-    "target": "อาณาจักรโรโค",
-    "confirmed": true,
-    "protected": false,
-    "category": "Administrative Region",
-    "definition": "Roco Kingdom is a powerful realm located on the land of Caeroxia. Its territories encompass the majority of the continent. The capital city, the Citadel, is situated in the province of Rocarian.Roco Kingdom was founded 200 years ago by King Arthiel and his Knights of the Circle, following a long war between their Rebel Army and their enemy, the Violaethrian Dynasty.Roco Kingdom is a feudal society made up of various houses, some of which were established by members of the Knights of the Circle. Its current ruler, Holy King Aindreas, is the son of King Arthiel.The Kingdom’s rule is generally benevolent toward both civilian Rocos and Jinis, in contrast with its predecessor, the Violaethrian Dynasty, which enforced malicious policies and employed Dark Magic against Rocos and Jinis alike."
-   },
-   {
-    "target": "Roco Kingdom",
-    "confirmed": true,
-    "protected": false,
-    "category": "Core Lore",
-    "definition": "《洛克王国》页游名字"
-   }
-  ]
  },
  {
   "source": "风眠省",
@@ -10006,7 +10092,7 @@
  },
  {
   "source": "精灵奖牌",
-  "target": "เหรียญรางวัลภูต",
+  "target": "เหรียญรางวัลจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -10120,7 +10206,7 @@
  },
  {
   "source": "暗夜拾光",
-  "target": "เก็บแสงรัตติกาล",
+  "target": "ประกายรัตติกาล",
   "confirmed": true,
   "protected": false
  },
@@ -10312,7 +10398,7 @@
  },
  {
   "source": "精灵魔法",
-  "target": "เวทภูต",
+  "target": "เวทจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -10324,13 +10410,13 @@
  },
  {
   "source": "精灵王",
-  "target": "ราชันภูต",
+  "target": "ราชันจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵王眷属",
-  "target": "วงศ์วานแห่งราชาภูต",
+  "target": "วงศ์วานแห่งราชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -10384,7 +10470,7 @@
  },
  {
   "source": "稀有精灵",
-  "target": "ภูตหายาก",
+  "target": "จินนี่หายาก",
   "confirmed": true,
   "protected": false
  },
@@ -10420,7 +10506,7 @@
  },
  {
   "source": "精灵语",
-  "target": "ภาษาภูต",
+  "target": "ภาษาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -10642,7 +10728,7 @@
  },
  {
   "source": "精灵教学日",
-  "target": "วันเรียนรู้เรื่องภูต",
+  "target": "วันเรียนรู้เรื่องจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -10786,7 +10872,7 @@
  },
  {
   "source": "光之精灵",
-  "target": "ภูตแห่งแสง",
+  "target": "จินนี่แห่งแสง",
   "confirmed": true,
   "protected": false
  },
@@ -11062,7 +11148,7 @@
  },
  {
   "source": "试炼精灵",
-  "target": "ภูตทดสอบ",
+  "target": "จินนี่ทดสอบ",
   "confirmed": true,
   "protected": false
  },
@@ -11116,13 +11202,13 @@
  },
  {
   "source": "精灵博学者",
-  "target": "นักปราชญ์ภูต",
+  "target": "นักปราชญ์จินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵魔法师",
-  "target": "นักเวทภูต",
+  "target": "นักเวทจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -11152,7 +11238,7 @@
  },
  {
   "source": "精灵视野",
-  "target": "มุมมองภูต",
+  "target": "มุมมองจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -11188,7 +11274,7 @@
  },
  {
   "source": "双精灵模式",
-  "target": "โหมดภูตคู่",
+  "target": "โหมดจินนี่คู่",
   "confirmed": true,
   "protected": false
  },
@@ -11206,7 +11292,7 @@
  },
  {
   "source": "随身背包",
-  "target": "กระเป๋าภูต",
+  "target": "กระเป๋าจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -11230,9 +11316,20 @@
  },
  {
   "source": "背包",
-  "target": "กระเป๋า",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "กระเป๋า",
+    "confirmed": true,
+    "protected": false,
+    "category": "Gameplay System"
+   },
+   {
+    "target": "กระเป๋าเสื้อผ้า",
+    "confirmed": true,
+    "protected": false,
+    "category": "Cosmetics system"
+   }
+  ]
  },
  {
   "source": "能量",
@@ -11290,7 +11387,7 @@
  },
  {
   "source": "精灵养成",
-  "target": "พัฒนา",
+  "target": "พัฒนาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -11986,7 +12083,7 @@
  },
  {
   "source": "精灵矿工",
-  "target": "ภูตขุดแร่",
+  "target": "จินนี่ขุดแร่",
   "confirmed": true,
   "protected": false
  },
@@ -12016,7 +12113,7 @@
  },
  {
   "source": "精灵知识竞赛",
-  "target": "ตอบคำถามภูต",
+  "target": "ตอบคำถามจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -12040,7 +12137,7 @@
  },
  {
   "source": "精灵学",
-  "target": "วิชาภูต",
+  "target": "วิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -12250,7 +12347,7 @@
  },
  {
   "source": "海珊瑚",
-  "target": "ปะการังทะเล",
+  "target": "คอรัลลิธ",
   "confirmed": true,
   "protected": false
  },
@@ -12358,9 +12455,20 @@
  },
  {
   "source": "花精灵",
-  "target": "ภูตดอกไม้",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "จินนี่ดอกไม้",
+    "confirmed": true,
+    "protected": false,
+    "category": "Creature Individual"
+   },
+   {
+    "target": "ภูตดอกไม้",
+    "confirmed": true,
+    "protected": false,
+    "category": "Jini Combat System"
+   }
+  ]
  },
  {
   "source": "甜甜金瓜",
@@ -12808,7 +12916,7 @@
  },
  {
   "source": "精灵小窝",
-  "target": "รังภูต",
+  "target": "รังจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -13702,7 +13810,7 @@
  },
  {
   "source": "液化魔药",
-  "target": "น้ำยาเวท",
+  "target": "ยาหลอมเหลว",
   "confirmed": true,
   "protected": false
  },
@@ -14482,7 +14590,7 @@
  },
  {
   "source": "精灵保护会徽章",
-  "target": "เข็มกลัดสมาคมคุ้มครองภูต",
+  "target": "เข็มกลัดสมาคมคุ้มครองจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -14938,7 +15046,7 @@
  },
  {
   "source": "赛季炫彩蛋",
-  "target": "ไข่หลากสีซีซัน",
+  "target": "ไข่สีรุ้งซีซัน",
   "confirmed": true,
   "protected": false
  },
@@ -15028,7 +15136,7 @@
  },
  {
   "source": "神奇炫彩蛋礼盒",
-  "target": "กล่องของขวัญไข่หลากสีมหัศจรรย์",
+  "target": "กล่องของขวัญไข่สีรุ้งมหัศจรรย์",
   "confirmed": true,
   "protected": false
  },
@@ -15058,7 +15166,7 @@
  },
  {
   "source": "噩梦精灵蛋",
-  "target": "ไข่ภูตฝันร้าย",
+  "target": "ไข่จินนี่ฝันร้าย",
   "confirmed": true,
   "protected": false
  },
@@ -15340,7 +15448,7 @@
  },
  {
   "source": "精灵稀有卡牌",
-  "target": "การ์ดภูตหายาก",
+  "target": "การ์ดจินนี่หายาก",
   "confirmed": true,
   "protected": false
  },
@@ -15358,7 +15466,7 @@
  },
  {
   "source": "精灵学共鸣",
-  "target": "เรโซแนนซ์แห่งวิชาภูต",
+  "target": "เรโซแนนซ์แห่งวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -15544,9 +15652,20 @@
  },
  {
   "source": "不动如山",
-  "target": "มั่นคงดั่งขุนเขา",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "แกร่งดั่งภูผา",
+    "confirmed": true,
+    "protected": false,
+    "category": "Jini Combat System"
+   },
+   {
+    "target": "มั่นคงดั่งขุนเขา",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   }
+  ]
  },
  {
   "source": "一拳",
@@ -18880,19 +18999,19 @@
  },
  {
   "source": "奇异血脉精灵",
-  "target": "ภูตสายเลือดจำเพาะ",
+  "target": "จินนี่สายเลือดจำเพาะ",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "污染血脉精灵",
-  "target": "ภูตสายเลือดปนเปื้อน",
+  "target": "จินนี่สายเลือดปนเปื้อน",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "首领血脉精灵",
-  "target": "ภูตสายเลือดอัลฟ่า",
+  "target": "จินนี่สายเลือดอัลฟ่า",
   "confirmed": true,
   "protected": false
  },
@@ -19228,7 +19347,7 @@
  },
  {
   "source": "精灵重置区域",
-  "target": "เขตรีเซ็ตภูต",
+  "target": "เขตรีเซ็ตจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -20020,13 +20139,13 @@
  },
  {
   "source": "精灵代步社",
-  "target": "ชมรมพาหนะภูต",
+  "target": "ชมรมพาหนะจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵竞速大赛",
-  "target": "แมตช์ประชันความเร็วภูต",
+  "target": "แมตช์ประชันความเร็วจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -20146,7 +20265,7 @@
  },
  {
   "source": "珍稀精灵调查团",
-  "target": "คณะสำรวจภูตหายาก",
+  "target": "คณะสำรวจจินนี่หายาก",
   "confirmed": true,
   "protected": false
  },
@@ -20548,7 +20667,7 @@
  },
  {
   "source": "精灵农场",
-  "target": "ฟาร์มภูต",
+  "target": "ฟาร์มจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -21364,7 +21483,7 @@
  },
  {
   "source": "棘刺印记",
-  "target": "ตราหนาม",
+  "target": "ตราพงหนาม",
   "confirmed": true,
   "protected": false
  },
@@ -23800,7 +23919,7 @@
  },
  {
   "source": "应对！不动如山",
-  "target": "มั่นคงดั่งขุนเขา (รับมือ)",
+  "target": "แกร่งดั่งภูผา (รับมือ)",
   "confirmed": true,
   "protected": false
  },
@@ -24508,7 +24627,7 @@
  },
  {
   "source": "星辰精灵",
-  "target": "ภูตแห่งดวงดาว",
+  "target": "จินนี่แห่งดวงดาว",
   "confirmed": true,
   "protected": false
  },
@@ -24598,7 +24717,7 @@
  },
  {
   "source": "精灵王座",
-  "target": "บัลลังก์ราชาภูต",
+  "target": "บัลลังก์ราชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -24634,13 +24753,13 @@
  },
  {
   "source": "精灵首领",
-  "target": "ภูตอัลฟ่า",
+  "target": "จินนี่อัลฟ่า",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵首领挑战",
-  "target": "ท้าทายอัลฟ่าภูต",
+  "target": "ท้าทายอัลฟ่าจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -24706,7 +24825,7 @@
  },
  {
   "source": "精灵的宝藏",
-  "target": "สมบัติภูต",
+  "target": "สมบัติจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -24730,7 +24849,7 @@
  },
  {
   "source": "世界精灵图鉴",
-  "target": "สมุดภาพภูตโลก",
+  "target": "สมุดภาพจินนี่โลก",
   "confirmed": true,
   "protected": false
  },
@@ -24748,7 +24867,7 @@
  },
  {
   "source": "壁炉伙伴",
-  "target": "คู่หูเตาผิง",
+  "target": "คู่หูข้างเตาผิง",
   "confirmed": true,
   "protected": false
  },
@@ -24795,15 +24914,13 @@
     "target": "ชนะทาง",
     "confirmed": true,
     "protected": false,
-    "category": "Jini Combat System",
-    "definition": "这是动词版本的克制，不应直接用于组合术语或者关键词，仅用于句子中表达克制关系"
+    "category": "Jini Combat System"
    },
    {
     "target": "ข่ม",
     "confirmed": true,
     "protected": false,
-    "category": "Jini Combat System",
-    "definition": "这是名词版本的克制，不应直接用于表达克制关系的句子中，可以用作单独出现的关键词"
+    "category": "Jini Combat System"
    }
   ]
  },
@@ -25032,12 +25149,6 @@
  {
   "source": "黛丝蒂",
   "target": "เดสตินี่",
-  "confirmed": true,
-  "protected": false
- },
- {
-  "source": "洛克王国：世界",
-  "target": "Roco Kingdom",
   "confirmed": true,
   "protected": false
  },
@@ -25613,7 +25724,7 @@
  },
  {
   "source": "精灵迷阵",
-  "target": "เขาวงกตภูต",
+  "target": "เขาวงกตจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -25643,7 +25754,7 @@
  },
  {
   "source": "记忆中的精灵农场",
-  "target": "ฟาร์มภูตในความทรงจำ",
+  "target": "ฟาร์มจินนี่ในความทรงจำ",
   "confirmed": true,
   "protected": false
  },
@@ -25943,7 +26054,7 @@
  },
  {
   "source": "精灵蛋",
-  "target": "ไข่ภูต",
+  "target": "ไข่จินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -25979,7 +26090,7 @@
  },
  {
   "source": "精灵旅行",
-  "target": "การเดินทางของภูต",
+  "target": "การเดินทางของจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -26033,7 +26144,7 @@
  },
  {
   "source": "精灵调查团",
-  "target": "คณะสำรวจภูต",
+  "target": "คณะสำรวจจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -26075,13 +26186,13 @@
  },
  {
   "source": "豆包鱼",
-  "target": "ปลาถั่วก้อน",
+  "target": "ฟินลอต",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "豆豆鱼",
-  "target": "ปลาถั่วน้อย",
+  "target": "ฟอเลตต้า",
   "confirmed": true,
   "protected": false
  },
@@ -26681,7 +26792,7 @@
  },
  {
   "source": "精灵抱抱团集合！",
-  "target": "ผจญภัยของแก๊งภูตสุดคิวท์!",
+  "target": "ผจญภัยของแก๊งจินนี่สุดคิวท์!",
   "confirmed": true,
   "protected": false
  },
@@ -26921,9 +27032,20 @@
  },
  {
   "source": "双学科导师",
-  "target": "อาจารย์สองสาขา",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "อาจารย์ญินวิทยาและการเล่นแร่แปรธาตุ",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   },
+   {
+    "target": "อาจารย์สอนญินวิทยาและการเล่นแร่แปรธาตุ",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   }
+  ]
  },
  {
   "source": "风纪委会长",
@@ -26933,9 +27055,20 @@
  },
  {
   "source": "战斗学导师",
-  "target": "อาจารย์วิชาการต่อสู้",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "อาจารย์วิชาการต่อสู้",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   },
+   {
+    "target": "อาจารย์สอนวิชาการต่อสู้",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   }
+  ]
  },
  {
   "source": "鸭中奸商",
@@ -26951,9 +27084,20 @@
  },
  {
   "source": "仪典学导师",
-  "target": "อาจารย์วิชาพิธีการ",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "อาจารย์วิชาพิธีการ",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   },
+   {
+    "target": "อาจารย์สอนวิชาพิธีการ",
+    "confirmed": true,
+    "protected": false,
+    "category": "Title"
+   }
+  ]
  },
  {
   "source": "骑士团近卫兵团",
@@ -27053,7 +27197,7 @@
  },
  {
   "source": "精灵学分院服",
-  "target": "ชุดสำนักวิชาภูต",
+  "target": "ชุดสำนักวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -28295,7 +28439,7 @@
  },
  {
   "source": "精灵学导论",
-  "target": "บทนำวิชาภูต",
+  "target": "บทนำวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -28361,25 +28505,25 @@
  },
  {
   "source": "狂暴精灵",
-  "target": "ภูตคลุ้มคลั่ง",
+  "target": "จินนี่คลุ้มคลั่ง",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵伙伴",
-  "target": "คู่หูภูต",
+  "target": "คู่หูจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵育成课",
-  "target": "วิชาฟูมฟักภูต",
+  "target": "วิชาฟูมฟักจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵狂暴事件",
-  "target": "เหตุการณ์ภูตคลุ้มคลั่ง",
+  "target": "เหตุการณ์จินนี่คลุ้มคลั่ง",
   "confirmed": true,
   "protected": false
  },
@@ -28529,7 +28673,7 @@
  },
  {
   "source": "五大守护灵",
-  "target": "ห้าภูตผู้พิทักษ์",
+  "target": "ห้าจินนี่ผู้พิทักษ์",
   "confirmed": true,
   "protected": false
  },
@@ -28655,13 +28799,13 @@
  },
  {
   "source": "契约精灵",
-  "target": "ภูตพันธสัญญา",
+  "target": "จินนี่พันธสัญญา",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "守护灵",
-  "target": "ภูตพิทักษ์",
+  "target": "จินนี่พิทักษ์",
   "confirmed": true,
   "protected": false
  },
@@ -28691,7 +28835,7 @@
  },
  {
   "source": "异变精灵",
-  "target": "ภูตกลายพันธุ์",
+  "target": "จินนี่กลายพันธุ์",
   "confirmed": true,
   "protected": false
  },
@@ -28841,55 +28985,55 @@
  },
  {
   "source": "精灵保育",
-  "target": "อนุรักษ์ภูต",
+  "target": "อนุรักษ์จินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵图鉴",
-  "target": "สมุดภาพภูต",
+  "target": "สมุดภาพจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵打工",
-  "target": "ภูตรับจ้าง",
+  "target": "จินนี่รับจ้าง",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵旅社",
-  "target": "โรงแรมภูต",
+  "target": "โรงแรมจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵生态保护",
-  "target": "คุ้มครองระบบนิเวศภูต",
+  "target": "คุ้มครองระบบนิเวศจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵育成",
-  "target": "ฟูมฟักภูต",
+  "target": "ฟูมฟักจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵议员",
-  "target": "สมาชิกสภาภูต",
+  "target": "สมาชิกสภาจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵队伍",
-  "target": "ทีมภูต",
+  "target": "ทีมจินนี่",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵骨质学",
-  "target": "วิทยาศาสตร์กระดูกภูต",
+  "target": "วิทยาศาสตร์กระดูกจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -28979,9 +29123,20 @@
  },
  {
   "source": "骑乘",
-  "target": "ขี่",
-  "confirmed": true,
-  "protected": false
+  "senses": [
+   {
+    "target": "ขี่",
+    "confirmed": true,
+    "protected": false,
+    "category": "Overworld Exploration Abilities"
+   },
+   {
+    "target": "ขึ้นขี่",
+    "confirmed": true,
+    "protected": false,
+    "category": "Overworld Exploration Abilities"
+   }
+  ]
  },
  {
   "source": "魔法屏障",
@@ -29015,7 +29170,7 @@
  },
  {
   "source": "精灵贷款",
-  "target": "สินเชื่อภูต",
+  "target": "สินเชื่อจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -29141,7 +29296,7 @@
  },
  {
   "source": "精灵建筑师",
-  "target": "สถาปนิกภูต",
+  "target": "สถาปนิกจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -29639,7 +29794,7 @@
  },
  {
   "source": "精灵历练",
-  "target": "ฝึกฝนภูต",
+  "target": "ฝึกฝนจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -30167,7 +30322,7 @@
  },
  {
   "source": "精灵学课程",
-  "target": "บทเรียนวิชาภูต",
+  "target": "บทเรียนวิชาจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -30353,7 +30508,7 @@
  },
  {
   "source": "铅字幻梦",
-  "target": "นิทานแห่งความฝัน",
+  "target": "เทพนิยายแฟนตาซี",
   "confirmed": true,
   "protected": false
  },
@@ -30377,13 +30532,13 @@
  },
  {
   "source": "等等鸭测试",
-  "target": "ทดสอบรอก่อนนะก้าบ",
+  "target": "ทดสอบก๊าบก๊าบ",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "急急鸭测试",
-  "target": "ทดสอบเป็ดเร็วจี๋",
+  "target": "ทดสอบก๊าบก๊าบ",
   "confirmed": true,
   "protected": false
  },
@@ -30755,7 +30910,7 @@
  },
  {
   "source": "伴生精灵",
-  "target": "ภูตอิงอาศัย",
+  "target": "จินนี่อิงอาศัย",
   "confirmed": true,
   "protected": false
  },
@@ -31109,7 +31264,7 @@
  },
  {
   "source": "库拉",
-  "target": "คูร่า",
+  "target": "โวลตรา",
   "confirmed": true,
   "protected": false
  },
@@ -31265,7 +31420,7 @@
  },
  {
   "source": "精灵导师",
-  "target": "เมนเทอร์ภูต",
+  "target": "เมนเทอร์จินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -31289,7 +31444,7 @@
  },
  {
   "source": "精灵果实",
-  "target": "ผลภูต",
+  "target": "ผลจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -31337,7 +31492,7 @@
  },
  {
   "source": "代步精灵",
-  "target": "ภูตพาหนะ",
+  "target": "จินนี่พาหนะ",
   "confirmed": true,
   "protected": false
  },
@@ -31535,7 +31690,7 @@
  },
  {
   "source": "众精灵",
-  "target": "เหล่าภูต",
+  "target": "เหล่าจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -31775,7 +31930,7 @@
  },
  {
   "source": "吵闹精灵",
-  "target": "ภูตจอมเสียงดัง",
+  "target": "จินนี่จอมเสียงดัง",
   "confirmed": true,
   "protected": false
  },
@@ -32273,7 +32428,7 @@
  },
  {
   "source": "机械精灵管家",
-  "target": "พ่อบ้านภูตจักรกล",
+  "target": "พ่อบ้านจินนี่จักรกล",
   "confirmed": true,
   "protected": false
  },
@@ -32633,13 +32788,13 @@
  },
  {
   "source": "精灵小宝",
-  "target": "ภูตน้อย",
+  "target": "จินนี่น้อย",
   "confirmed": true,
   "protected": false
  },
  {
   "source": "精灵旅社管家",
-  "target": "พ่อบ้านโรงแรมภูต",
+  "target": "พ่อบ้านโรงแรมจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -33467,7 +33622,7 @@
  },
  {
   "source": "珍稀精灵保护计划",
-  "target": "แผนคุ้มครองภูตหายาก",
+  "target": "แผนคุ้มครองจินนี่หายาก",
   "confirmed": true,
   "protected": false
  },
@@ -34409,7 +34564,7 @@
  },
  {
   "source": "精灵王的馈赠",
-  "target": "ของขวัญราชันภูต",
+  "target": "ของขวัญราชันจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -34499,7 +34654,7 @@
  },
  {
   "source": "精灵赐福",
-  "target": "พรแห่งภูต",
+  "target": "พรแห่งจินนี่",
   "confirmed": true,
   "protected": false
  },
@@ -34674,6 +34829,2154 @@
  {
   "source": "地神",
   "target": "เทพแห่งปฐพี",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "《实验记录·残页》",
+  "target": "\"บันทึกการทดลอง - แผ่นฉีก\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "《无名日记》",
+  "target": "\"ไดอารี่ไร้นาม\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "《月光狼传说》",
+  "target": "\"ตำนานหมาป่ามูนไลท์\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "《盟约记录》",
+  "target": "\"บันทึกพันธสัญญา\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "《金水河谷报税单》",
+  "target": "\"ใบแจ้งภาษีหุบเขาแม่น้ำโกลเดนเวล\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「先王宣言」",
+  "target": "\"ประกาศกษัตริย์องค์ก่อน\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「冒险王吉洛斯」·一",
+  "target": "\"ราชาแห่งการผจญภัย กิลลอส\" - 1",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「创新魔药记录」",
+  "target": "\"บันทึกยาเวทนวัตกรรมใหม่\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「大侦探福尔摩卡」",
+  "target": "\"ยอดนักสืบโฮล์มส์คา\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「巨人王座的传说」",
+  "target": "\"ตำนานบัลลังก์ยักษ์\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「德古拉之谜」",
+  "target": "\"ปริศนาแดรกคูลา\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「王国条例精讲」",
+  "target": "\"อธิบายระเบียบข้อบังคับอาณาจักรเจาะลึก\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「粉发女骑士-克里斯汀传」",
+  "target": "\"ตำนานอัศวินหญิงผมชมพู - คริสติน่า\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「紫雀花药典」",
+  "target": "\"ตำรายาดอกนกกระจอกม่วง\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「翠顶夫人故事集」",
+  "target": "\"รวมเรื่องเล่ามาดามสีมรกต\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「荒原上的紫雀花」",
+  "target": "\"ดอกนกกระจอกม่วงบนทุ่งร้าง\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「走进月夜—吸血鬼大揭秘」",
+  "target": "\"สู่คืนเดือนเพ็ญ - เผยความลับแวมไพร์\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「麦斯威尔手记」",
+  "target": "\"บันทึกแมสเวลล์\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "「麦斯威尔的批注」",
+  "target": "\"หมายเหตุของแมสเวลล์\"",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "16周年，同行快洛！",
+  "target": "ครบรอบ 16 ปี ร่วมทางสุขสันต์ไปกับโรโค!",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "S1",
+  "target": "เก็บแสงรัตติกาล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "S2",
+  "target": "คาร์นิวัลพิศวง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "S3",
+  "target": "เทพนิยายแฟนตาซี",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "安安",
+  "target": "อันอัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "安眠",
+  "target": "หลับสบาย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "白加尔专属技能",
+  "target": "สกิลเฉพาะโคลเวรินขาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "薄纱环",
+  "target": "วงแหวนผ้าโปร่ง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "爆裂玉米",
+  "target": "ข้าวโพดระเบิด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "背袭捕捉",
+  "target": "จับแทงข้างหลัง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "蹦跶",
+  "target": "ดุ๊กดิ๊ก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "冰裂",
+  "target": "รอยแยกน้ำแข็ง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "冰雪魂魄",
+  "target": "วิญญาณน้ำแข็งหิมะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "伯爵在等你",
+  "target": "เคานต์กำลังรอคุณอยู่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "补觉",
+  "target": "นอนชดเชย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "不咕钟研究手记",
+  "target": "บันทึกวิจัยนาฬิกากุ๊กกู",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "不怕温差的指挥家",
+  "target": "วาทยกรผู้ไม่หวั่นอุณหภูมิ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "不死鸟",
+  "target": "วิหคอมตะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "布丁造型茶点",
+  "target": "ขนมรูปพุดดิ้ง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "裁决",
+  "target": "พิพากษา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草木苏醒时",
+  "target": "ยามพฤกษาตื่น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草系部落",
+  "target": "เผ่าธาตุพืช",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草系大魔法师",
+  "target": "มหาจอมเวทธาตุพืช",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草系徽章试炼",
+  "target": "การทดสอบตราธาตุพืช",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草系巨人部落",
+  "target": "เผ่ายักษ์ธาตุพืช",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草系巨人部落徽记",
+  "target": "ตราสัญลักษณ์เผ่ายักษ์ธาตุพืช",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "草原守护",
+  "target": "ปกป้องทุ่งหญ้า",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "蹭鼻尖",
+  "target": "ถูปลายจมูก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "拆礼物",
+  "target": "แกะกล่องของขวัญ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "超级！光能聚集",
+  "target": "สุดยอด! รวมพลังแสง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "超声波",
+  "target": "คลื่นเหนือเสียง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "潮汐集市",
+  "target": "ไทดัลบาซาร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "吃独食",
+  "target": "กินไม่แบ่งใคร",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "初级孵化宝典",
+  "target": "คู่มือฟักไข่ระดับต้น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "船长罐罐",
+  "target": "กัปตันกระป๋อง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "船长衣柜",
+  "target": "ตู้เสื้อผ้ากัปตัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "吹散",
+  "target": "เป่าสลาย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "捶胸口",
+  "target": "ทุบอก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "淬炼火",
+  "target": "เพลิงขัดหลอม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "大厨消毒法",
+  "target": "วิธีฆ่าเชื้อของพ่อครัว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "大大的大块头",
+  "target": "เจ้าตัวใหญ่ยักษ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "大块头密卷",
+  "target": "คัมภีร์ลับจอมพลัง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "大侦探福尔摩卡之阁楼上的笔名",
+  "target": "ยอดนักสืบโฮล์มส์คา - นามปากกาบนห้องใต้หลังคา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "呆呆",
+  "target": "รูรู",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "德古拉",
+  "target": "แดรกคูลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "德古拉伯爵",
+  "target": "เคานต์แดรกคูลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "地区探索获得",
+  "target": "ได้รับจากการสำรวจพื้นที่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "滴眼液",
+  "target": "ยาหยอดตา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "点亮",
+  "target": "ส่องสว่าง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "点燃",
+  "target": "จุดประกาย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "电子音乐",
+  "target": "เพลงอิเล็กทรอนิกส์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "调查团杂货店",
+  "target": "ร้านขายของชำของทีมสำรวจ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "叠浪",
+  "target": "คลื่นซ้อน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "盯梢",
+  "target": "สะกดรอย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "顶风作案",
+  "target": "ฝ่ากระแสลมทำภารกิจ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "毒誓",
+  "target": "คำสาบานพิษ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "毒素强化",
+  "target": "เสริมพลังพิษ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "断桥重建",
+  "target": "ซ่อมสะพานหัก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "恶魔男爵",
+  "target": "อิมป์เพอเรอร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "凡羽掠影",
+  "target": "ขนนกเฉี่ยวเงา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "放心吧",
+  "target": "ไม่ต้องห่วง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "焚身",
+  "target": "เผากายา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "丰收",
+  "target": "เก็บเกี่ยว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "蝠蝶兰",
+  "target": "กล้วยไม้ค้างคาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "腐蚀强酸",
+  "target": "กรดรุนแรงกัดกร่อน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "负面愿力",
+  "target": "พลังปรารถนาดีบัฟ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "高级孵化宝典",
+  "target": "คู่มือฟักไข่ระดับสูง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "贡献度",
+  "target": "แต้มสมทบ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "古典菱纹",
+  "target": "ลายข้าวหลามตัดคลาสสิก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "古老零件",
+  "target": "ชิ้นส่วนโบราณ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "谷底有星",
+  "target": "ก้นหุบเขามีดาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "观察员",
+  "target": "ผู้สังเกตการณ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "光的冠冕",
+  "target": "มงกุฎแห่งแสง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "光度换算",
+  "target": "การแปลงค่าความสว่าง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "光明徽记",
+  "target": "ตราสัญลักษณ์แห่งแสง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "光王祭坛",
+  "target": "แท่นบูชาราชาแห่งแสง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "过敏原",
+  "target": "สารก่อภูมิแพ้",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "海风轻束",
+  "target": "สายลมแผ่วเบาของทะเล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "寒潮",
+  "target": "คลื่นหนาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "豪华手册",
+  "target": "คู่มือสุดหรู",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "和弦共振",
+  "target": "คอร์ดสั่นพ้อง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "黑加尔专属技能",
+  "target": "สกิลเฉพาะโคลเวรินดำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "花园餐车",
+  "target": "รถเข็นอาหารในสวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "花园茶会椅",
+  "target": "เก้าอี้งานเลี้ยงน้ำชาในสวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "花园茶会圆桌",
+  "target": "โต๊ะกลมงานเลี้ยงน้ำชาในสวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "花园里的秘密礼物",
+  "target": "ของขวัญลับในสวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "缓一缓",
+  "target": "พักสักหน่อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "幻影星光法杖",
+  "target": "ไม้เท้าเวทมายาสตาร์ไลท์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "皇家秘术",
+  "target": "วิชาลับราชวงศ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "回复限制",
+  "target": "จำกัดการฟื้นฟู",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "回溯",
+  "target": "ย้อนเวลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "火系部落",
+  "target": "เผ่าธาตุไฟ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "火系巨人部落",
+  "target": "เผ่ายักษ์ธาตุไฟ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "火系巨人部落徽记",
+  "target": "ตราสัญลักษณ์เผ่ายักษ์ธาตุไฟ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "机械咕咕挂钟",
+  "target": "นาฬิกาติดผนังจักรกลกูกู",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "吉洛斯的兑换商店",
+  "target": "ร้านแลกเปลี่ยนของกิลลอส",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "急中生智",
+  "target": "ไหวพริบยามคับขัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "集成",
+  "target": "หลอมรวม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "集市建设值",
+  "target": "แต้มสร้างตลาดนัด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "记忆中的巨石阵",
+  "target": "สโตนเฮนจ์ในความทรงจำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "记忆中的普拉塔草原",
+  "target": "ทุ่งหญ้าพลาตาในความทรงจำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "记忆中的索米亚草原",
+  "target": "ทุ่งหญ้าโซเมียในความทรงจำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "加尔印记",
+  "target": "ตราโคลเวริน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "见闻录",
+  "target": "บันทึกการเดินทาง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "绞轮",
+  "target": "กว้าน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "节奏混乱",
+  "target": "จังหวะอลหม่าน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "结晶花",
+  "target": "ดอกคริสตัล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "结晶水",
+  "target": "น้ำผลึก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "结晶枝",
+  "target": "กิ่งคริสตัล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "今夜因你闪耀",
+  "target": "คืนนี้เปล่งประกายเพราะคุณ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "惊雷",
+  "target": "อัสนีคำราม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "惊喜盒子",
+  "target": "กล่องสุ่มนำโชค",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精力充沛",
+  "target": "เต็มไปด้วยพลังงาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵成长包裹",
+  "target": "แพ็กเติบโตจินนี่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵分享卡",
+  "target": "การ์ดแชร์จินนี่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵观察笔记",
+  "target": "บันทึกการสังเกตจินนี่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵荣誉证书",
+  "target": "ใบประกาศเกียรติคุณจินนี่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵园导览册",
+  "target": "คู่มือแนะนำสวนจินนี่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "警戒",
+  "target": "เฝ้าระวัง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "净化",
+  "target": "ชำระล้าง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "救赎·咬咬小子",
+  "target": "การไถ่โทษ - นิเบิลเทล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "飓风行迹法杖",
+  "target": "ไม้เท้าเวทร่องรอยพายุเฮอริเคน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "咔嚓印章",
+  "target": "ภาพจำแชะแชะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "看报纸",
+  "target": "อ่านหนังสือพิมพ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "可爱",
+  "target": "น่ารัก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "狂欢精通者",
+  "target": "ผู้เชี่ยวชาญคาร์นิวัล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "困兽",
+  "target": "อสูรที่ถูกขัง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "浪花币",
+  "target": "เหรียญคลื่น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "冷凝",
+  "target": "ควบแน่น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "理财高手",
+  "target": "มือโปรการเงิน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "理论-I",
+  "target": "ทฤษฎี - I",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "连击抗性",
+  "target": "ต้านทานคอมโบ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "联动礼包",
+  "target": "แพ็กเกจร่วม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "裂谷无风",
+  "target": "หุบเขาแยกไร้สายลม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "流沙统治者",
+  "target": "เจ้าปกครองทรายดูด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "鎏金魔法茶具",
+  "target": "ชุดน้ำชาเวทชุบทอง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "六自由度",
+  "target": "หกองศาอิสระ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "龙守望",
+  "target": "มังกรผู้พิทักษ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "龙息帕尔再临",
+  "target": "ดราก้อนพาร์ลกลับมาเยือน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "噜噜的调研时间",
+  "target": "เวลาวิจัยของฮูลู",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "路过出版社",
+  "target": "เดินผ่านสำนักพิมพ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "轮班",
+  "target": "ผลัดเวร",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "落种",
+  "target": "เมล็ดพันธุ์ที่ร่วงหล่น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "马戏团巡游",
+  "target": "ขบวนลาดตระเวนละครสัตว์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "鳗鳗",
+  "target": "บลอสโซเมล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "慢慢电弧",
+  "target": "อาร์กสายฟ้าเชื่องช้า",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "猫精灵的礼物",
+  "target": "ของขวัญจากจินนี่แมว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "毛绒兑换券",
+  "target": "คูปองแลกขนปุย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "毛绒礼包",
+  "target": "แพ็กขนปุย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "冒险补给",
+  "target": "เสบียงผจญภัย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "冒险集结",
+  "target": "รวมพลผจญภัย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "冒险王吉洛斯之丛林宝柜",
+  "target": "ตู้สมบัติแห่งพงไพรของราชานักผจญภัยกิลลอส",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "没喊名字的回声",
+  "target": "เสียงสะท้อนไร้ชื่อ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "没味道的点心",
+  "target": "ขนมไร้รสชาติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "美好祈愿",
+  "target": "การอธิษฐานที่งดงาม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "美愿结晶",
+  "target": "คริสตัลปรารถนาดี",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "美愿树",
+  "target": "ต้นไม้ความปรารถนา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "迷失的旅人",
+  "target": "นักเดินทางผู้หลงทาง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "米歇埃寇",
+  "target": "มิเชเอโกะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "秘法潮汐",
+  "target": "เวทลับธาราไหลวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "喵耳彩绘立柜",
+  "target": "ตู้วาดลายหูแมว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "铭记",
+  "target": "จดจารึก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "魔法绘本",
+  "target": "หนังสือภาพเวทมนตร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "魔法藤蔓",
+  "target": "เถาวัลย์เวท",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "魔菇",
+  "target": "เห็ดเวท",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "魔镜",
+  "target": "กระจกเวทมนตร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "莫比乌斯",
+  "target": "โมบิอุส",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "莫里亚克报纸筒",
+  "target": "ท่อหนังสือพิมพ์เมาริแอค",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "暮光轻吟",
+  "target": "ขับขานแสงยามเย็น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "南瓜墩",
+  "target": "แท่นฟักทอง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "拟寄生",
+  "target": "ปรสิตเทียม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "扭曲出版社",
+  "target": "สำนักพิมพ์บิดเบี้ยว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "女神祭坛",
+  "target": "แท่นบูชาเทพธิดา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "帕斯卡尔",
+  "target": "ปาสกาล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "盘根木",
+  "target": "รากไม้เลื้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "碰拳",
+  "target": "ชนหมัด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "噼啪噼啪！",
+  "target": "เปรี๊ยะเปรี๊ยะ!",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "破碎的日记",
+  "target": "บันทึกฉีกขาด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "普拉塔草原",
+  "target": "ทุ่งหญ้าพราตา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "齐鸣",
+  "target": "ประสานกังวาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "骑士之炎",
+  "target": "เปลวไฟแห่งอัศวิน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "启航礼包",
+  "target": "แพ็กออกเดินทาง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "掐着表的打工人",
+  "target": "คนทำงานดูเวลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "牵线的搭桥人",
+  "target": "ผู้เชื่อมสัมพันธ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "强制过滤",
+  "target": "กรองแบบบังคับ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "青草祝福",
+  "target": "พรแห่งหญ้าเขียว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "权衡利弊",
+  "target": "ชั่งน้ำหนักข้อดีข้อเสีย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "热度值",
+  "target": "คะแนนความนิยม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "忍耐",
+  "target": "อดทน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "认可之证",
+  "target": "ใบรับรองการยอมรับ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "溶解",
+  "target": "ละลาย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "撒花",
+  "target": "โปรยดอกไม้",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "扫荡",
+  "target": "เคลียร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "沙石阵",
+  "target": "สนามหินทราย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "上锁",
+  "target": "ล็อก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "谁把月亮挂错了",
+  "target": "ใครแขวนดวงจันทร์ผิดกันนะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "谁在敲门？",
+  "target": "ใครกำลังเคาะประตู?",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "深陷泥沼",
+  "target": "ติดหล่มลึก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "神勺",
+  "target": "ช้อนเทพ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "圣剑",
+  "target": "ดาบศักดิ์สิทธิ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "圣剑残片",
+  "target": "เศษเสี้ยวดาบศักดิ์สิทธิ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "圣勺",
+  "target": "ช้อนศักดิ์สิทธิ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "盛宴",
+  "target": "งานเลี้ยงใหญ่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "石耳",
+  "target": "หูศิลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "石阶上的祷告",
+  "target": "การอธิษฐานบนบันไดหิน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "时光梦境",
+  "target": "แดนฝันกาลเวลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "试飞",
+  "target": "ทดลองบิน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "守护·足尖元件",
+  "target": "ปกป้อง - พอยเนตต์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "守护之心",
+  "target": "หัวใจแห่งการปกป้อง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "耍赖",
+  "target": "เล่นตุกติก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "双人礼券",
+  "target": "คูปองคู่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "双生打击",
+  "target": "คู่แฝดโจมตี",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "双生强化",
+  "target": "คู่แฝดเสริมพลัง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "水系部落",
+  "target": "เผ่าธาตุน้ำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "水系巨人部落",
+  "target": "เผ่ายักษ์ธาตุน้ำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "睡铃花开的温柔",
+  "target": "ความอ่อนโยนยามระฆังนิทราเบ่งบาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "睡铃花下",
+  "target": "ใต้ระฆังนิทรา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "顺顺特调版珊瑚沙拉",
+  "target": "สลัดปะการังสูตรพิเศษของชอน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "说拜拜",
+  "target": "บอกลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "四叶草童话集",
+  "target": "รวมเทพนิยายคลอเวอร์สี่แฉก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "搜刮一空",
+  "target": "กวาดเรียบหมด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "随机能耗",
+  "target": "สุ่มพลังงานที่ใช้",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "所有烦恼",
+  "target": "ทุกความกังวล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "锁芯",
+  "target": "แกนล็อก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "踏野·宝藏沙狐",
+  "target": "ตะลุยทุ่ง - บัฟเฟล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "贪得无厌",
+  "target": "โลภมากไม่สิ้นสุด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "甜蜜陷阱",
+  "target": "กับดักแสนหวาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "童话球",
+  "target": "ลูกบอลเทพนิทาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "童话纸箱",
+  "target": "กล่องกระดาษนิทาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "童梦小作家",
+  "target": "นักเขียนน้อยแห่งความฝันเด็ก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "瞳中倒影",
+  "target": "เงาสะท้อนในดวงตา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "透镜实验",
+  "target": "การทดลองเลนส์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "万事通商店",
+  "target": "ร้านมิสเตอร์รอบรู้",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王国工程部",
+  "target": "ฝ่ายวิศวกรรมอาณาจักร",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王国运营部",
+  "target": "ฝ่ายบริหารอาณาจักร",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王国之约",
+  "target": "สัญญาแห่งอาณาจักร",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王脉长青",
+  "target": "สายเลือดแห่งราชาเขียวชอุ่มชั่วนิรันดร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王炎不熄",
+  "target": "เพลิงแห่งราชาไม่เคยดับสูญ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王渊不涸",
+  "target": "ห้วงเหวแห่งราชาไม่เคยแห้งเหือด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "王子的诺言",
+  "target": "คำสัญญาของเจ้าชาย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "微型斥候",
+  "target": "หน่วยสอดแนมจิ๋ว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "委屈",
+  "target": "น้อยใจ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "物资包",
+  "target": "แพ็กวัสดุ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "吸血鬼的传说",
+  "target": "ตำนานของแวมไพร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "下注",
+  "target": "เดิมพัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "夏日潮汐集市",
+  "target": "ตลาดธาราไหลวนฤดูร้อน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "夏日里的老蒲扇",
+  "target": "พัดปาล์มเก่าแห่งฤดูร้อน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "限时特惠",
+  "target": "โปรโมชันจำกัดเวลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小不点密卷",
+  "target": "คัมภีร์ลับจิ๋ว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小风车",
+  "target": "กังหันลมน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐·奖状证书",
+  "target": "ใบประกาศนียบัตร - จิ้งจอกน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐安安",
+  "target": "น้องจิ้งจอกอันอัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐安家记",
+  "target": "จิ้งจอกน้อยลงหลักปักฐาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐币",
+  "target": "เหรียญจิ้งจอกน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐考察团",
+  "target": "คณะสำรวจจิ้งจอกน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐爪爪",
+  "target": "อุ้งเท้าจิ้งจอกน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小狐之友",
+  "target": "เพื่อนจิ้งจอกน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小试牛刀",
+  "target": "ลองแสดงฝีมือ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小顽童",
+  "target": "จอมซนตัวน้อย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小小的小不点",
+  "target": "เจ้าตัวจิ๋วเล็ก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小小狐家在何方",
+  "target": "บ้านจิ้งจอกน้อยอยู่ที่ไหนนะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小小南瓜灯",
+  "target": "โคมไฟฟักทองจิ๋ว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小小星火灯",
+  "target": "โคมประกายดาวจิ๋ว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "小小星霜灯",
+  "target": "โคมไฟสตาร์ฟรอสต์จิ๋ว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "星光印记",
+  "target": "ตราสตาร์ไลท์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "星痕",
+  "target": "รอยดารา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "星落繁花法杖",
+  "target": "ไม้เท้าเวทผกาธาราดาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "星愿值",
+  "target": "พลังปรารถนาดาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "休憩时刻",
+  "target": "เวลาพักผ่อน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "许愿池",
+  "target": "บ่ออธิษฐาน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "雪巨人洞窟",
+  "target": "ถ้ำยักษ์หิมะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "雪山手信",
+  "target": "ของฝากจากภูเขาหิมะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "雪原狩猎",
+  "target": "ล่าในแดนหิมะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "亚哲国王",
+  "target": "ราชาอาเชอร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "岩上回声",
+  "target": "เสียงสะท้อนบนโขดหิน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "岩土祝福",
+  "target": "พรพสุธา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "扬尘",
+  "target": "ฝุ่นฟุ้ง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "阳光祝福",
+  "target": "พรแห่งแสงแดด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "养分回流",
+  "target": "สารอาหารไหลกลับ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "野火",
+  "target": "ไฟป่า",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "夜的呼唤",
+  "target": "เสียงเรียกแห่งรัตติกาล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "一起嗨",
+  "target": "สนุกไปด้วยกัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "一起快洛一起嗨",
+  "target": "ไปกับโรโค สนุกไปด้วยกัน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "一意孤行",
+  "target": "ดื้อดึงตามใจตัวเอง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "议政厅",
+  "target": "ห้องประชุม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常变化",
+  "target": "เปลี่ยนแปลงผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常惰化",
+  "target": "เฉื่อยชาผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常防御",
+  "target": "ป้องกันผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常负面",
+  "target": "ดีบัฟผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常恢复",
+  "target": "ฟื้นฟูผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常坚定",
+  "target": "เด็ดเดี่ยวผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常减伤",
+  "target": "ลดดาเมจผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常聚能",
+  "target": "รวมพลังผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异常冷却",
+  "target": "คูลดาวน์ผิดปกติ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异类",
+  "target": "ประเภทพิเศษ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异色蛋礼包",
+  "target": "แพ็กไข่สีพิเศษ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "异色奇遇礼包",
+  "target": "แพ็กเซอร์ไพรส์สีพิเศษ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "轶事篇章",
+  "target": "บทเรื่องเล่า",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "隐于风中",
+  "target": "ซ่อนตัวในสายลม",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！超声波",
+  "target": "รับมือ! คลื่นเหนือเสียง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！点亮",
+  "target": "รับมือ! ส่องสว่าง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！寒潮",
+  "target": "รับมือ! คลื่นหนาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！龙守望",
+  "target": "รับมือ! มังกรผู้พิทักษ์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！秘法潮汐",
+  "target": "รับมือ! เวทลับธาราไหลวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！溶解",
+  "target": "รับมือ! ละลาย",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！撒花",
+  "target": "รับมือ! โปรยดอกไม้",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！透镜实验",
+  "target": "รับมือ! การทดลองเลนส์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！委屈",
+  "target": "รับมือ! น้อยใจ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "应对！友谊满溢",
+  "target": "รับมือ! มิตรภาพเปี่ยมล้น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "迎宾",
+  "target": "ต้อนรับแขก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "幽影石",
+  "target": "หินเงาหลอน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "友谊满溢",
+  "target": "มิตรภาพเปี่ยมล้น",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "友谊之果",
+  "target": "ผลแห่งมิตรภาพ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "有求必应",
+  "target": "ตอบรับทุกคำขอ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "鱼乐达人",
+  "target": "เซียนตกปลา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "与星星同行",
+  "target": "ร่วมทางกับดวงดาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "鸢尾研究员",
+  "target": "นักวิจัยไอริส",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "原初之水",
+  "target": "น้ำต้นกำเนิด",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "远行",
+  "target": "ออกเดินทางไกล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "远行的见证者",
+  "target": "พยานแห่งการเดินทางไกล",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "月光罐头",
+  "target": "กระป๋องมูนไลท์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "月光下的古堡",
+  "target": "ปราสาทโบราณใต้แสงจันทร์",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "月兔舰队",
+  "target": "กองเรือกระต่ายจันทรา",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "扎手",
+  "target": "ทิ่มมือ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "长久保存制法",
+  "target": "วิธีเก็บรักษาระยะยาว",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "瘴上加毒",
+  "target": "พิษซ้ำพิษซ้อน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "折光小径",
+  "target": "เส้นทางหักเหแสง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "鸩毒喷射",
+  "target": "พ่นพิษมรณะ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "振翅",
+  "target": "กระพือปีก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "蒸汽进行曲",
+  "target": "เพลงมาร์ชไอน้ำ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "中级孵化宝典",
+  "target": "คู่มือฟักไข่ระดับกลาง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "重逢手册",
+  "target": "คู่มือหวนคืน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "周边屋",
+  "target": "บ้านของที่ระลึก",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "转圈圈",
+  "target": "หมุนวน",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "装满材料的小包裹",
+  "target": "พัสดุเล็กๆ ที่เต็มไปด้วยวัสดุ",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "装满矿石的小包裹",
+  "target": "พัสดุเล็กๆ ที่เต็มไปด้วยแร่",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "走丢的脚印",
+  "target": "รอยเท้าที่หลงทาง",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "做好事",
+  "target": "ทำเรื่องดี",
+  "confirmed": true,
+  "protected": false
+ },
+ {
+  "source": "精灵守护",
+  "target": "จินนี่การ์ด",
   "confirmed": true,
   "protected": false
  }

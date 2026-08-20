@@ -50,6 +50,7 @@ from lqe_paths import (  # noqa: E402
     state_reference_paths,
     validate_artifact_paths,
 )
+from lqe_target_form import load_target_form_policy  # noqa: E402
 from lqe_scoring import (  # noqa: E402
     resolve_scoring_policy,
     score_errors,
@@ -251,6 +252,7 @@ def _validated_results(
                 allow_internal_provenance=bound,
                 require_internal_provenance=bound,
                 review_policy=get_review_policy(state),
+                target_form_policy=load_target_form_policy(live_state),
             )
             validate_scope_entries(
                 state,

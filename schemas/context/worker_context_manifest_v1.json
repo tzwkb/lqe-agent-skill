@@ -80,10 +80,18 @@
     "packet_payloads": {"$ref": "#/$defs/set_summary"},
     "budget": {
       "type": "object",
-      "required": ["max_bytes", "measured_bytes", "components", "status"],
+      "required": ["measured_bytes", "components", "status"],
       "properties": {
-        "max_bytes": {"type": "integer", "minimum": 1},
-        "measured_bytes": {"type": "integer", "minimum": 0},
+        "max_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Legacy advisory metadata only; current producers write null and validators do not enforce it."
+        },
+        "measured_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sum of the listed input components. Complete dispatch measurement, including the manifest envelope, is recorded by the batch or input-measurement artifact."
+        },
         "components": {
           "type": "object",
           "required": [
@@ -102,7 +110,10 @@
           },
           "additionalProperties": false
         },
-        "status": {"const": "within_budget"}
+        "status": {
+          "enum": ["advisory", "within_budget"],
+          "description": "Current producers write advisory; within_budget is accepted only for legacy manifests."
+        }
       },
       "additionalProperties": false
     },

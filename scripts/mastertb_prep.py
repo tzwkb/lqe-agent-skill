@@ -36,6 +36,7 @@ from lqe_chunk import (
     with_precheck_refs,
 )
 from lqe_corrections import CheckFormatError, build_results, normalize_check_entries
+from lqe_target_form import load_target_form_policy
 from lqe_engine import (
     get_check_scope,
     get_review_policy,
@@ -602,6 +603,7 @@ def _cmd_merge_locked(a, job: Path, state: dict, manifest: dict, revalidate):
         allow_internal_provenance=bound,
         require_internal_provenance=bound,
         review_policy=get_review_policy(state),
+        target_form_policy=load_target_form_policy(state),
     )
     errors_path = job / "errors.json"
     revalidate()

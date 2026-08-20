@@ -14,7 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from lqe_capabilities import normalize_profile, resolve_capabilities
 from lqe_context import descriptor_registry
-from lqe_context_bundle import canonical_digest
+from lqe_context_bundle import canonical_digest, measure_complete_worker_input_bytes
 from lqe_profile_ingest import source_digest
 from lqe_project_assets import asset_statuses, inspect_project_assets
 import lqe_suggestion_review
@@ -230,6 +230,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             "source_manifest_path": str(
                 (self.job / "input_manifest.json").resolve()
             ),
+            "checks_path": str((self.job / "checks.json").resolve()),
             "sg_path": str((self.job / "sg.md").resolve()),
             "confirmed_rules_path": str(
                 (self.job / "confirmed_rules.md").resolve()
@@ -330,13 +331,39 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
+        bundle_set = json.loads(
+            (self.job / "suggestion_context" / "bundle_set.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        content_index = json.loads(
+            (self.job / "suggestion_context" / "content_index.json").read_text(
+                encoding="utf-8"
+            )
+        )
         context_digest = generation_packet["worker_context_manifest_digest"]
         self.assertEqual(
             context_digest,
             worker_manifest["worker_context_manifest_digest"],
         )
-        self.assertEqual(worker_manifest["budget"]["max_bytes"], 100_000)
-        self.assertLessEqual(worker_manifest["budget"]["measured_bytes"], 100_000)
+        self.assertIsNone(worker_manifest["budget"]["max_bytes"])
+        self.assertEqual(worker_manifest["budget"]["status"], "advisory")
+        generation_measurement = json.loads(
+            (self.job / "suggestion_context" / "input_measurement.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(generation_measurement["mode"], "advisory")
+        self.assertEqual(generation_measurement["decision_owner"], "main_agent")
+        self.assertEqual(
+            generation_measurement["largest_worker_input_bytes"],
+            measure_complete_worker_input_bytes(
+                worker_manifest,
+                bundle_set,
+                [generation_packet],
+                additional_inputs=[content_index],
+            ),
+        )
         self.assertTrue(worker_manifest["worker_documents"])
         self.assertEqual(
             {
@@ -372,6 +399,15 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         packet = json.loads(
             (self.job / "suggestion_review.packet.json").read_text(encoding="utf-8")
         )
+        review_measurement = json.loads(
+            (
+                self.job
+                / "suggestion_review_context"
+                / "input_measurement.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(review_measurement["mode"], "advisory")
+        self.assertGreater(review_measurement["largest_worker_input_bytes"], 0)
         self.assertEqual(packet["reviewed_ids"], [0, 2])
         self.assertEqual(packet["worker_context_manifest_digest"], context_digest)
         self.assertTrue(
@@ -381,6 +417,15 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         )
         verifier_instructions = packet["instructions"]["verifier_instructions"]
         verifier_payload = (ROOT / "references" / "suggestion_review.md").read_bytes()
+        self.assertEqual(
+            review_measurement["largest_worker_input_bytes"],
+            measure_complete_worker_input_bytes(
+                worker_manifest,
+                bundle_set,
+                [packet],
+                additional_inputs=[content_index, verifier_payload],
+            ),
+        )
         self.assertEqual(
             verifier_instructions,
             {
@@ -520,7 +565,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "without passing every"):
             lqe_suggestion_review.validate_review_draft(failed_check, packet)
 
-    def test_oversized_suggestions_are_batched_and_merged_without_truncation(self):
+    def test_agent_selected_batches_are_merged_without_truncation(self):
         state = json.loads((self.job / "state.json").read_text(encoding="utf-8"))
         segments = []
         errors = []
@@ -567,7 +612,14 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         write_json(self.job / "state.json", state)
         write_json(self.job / "errors.json", errors)
 
-        prepared = self.run_script(SUGGESTIONS, "prepare", "--job", self.job)
+        prepared = self.run_script(
+            SUGGESTIONS,
+            "prepare",
+            "--job",
+            self.job,
+            "--worker-batch-size",
+            4,
+        )
         self.assert_ok(prepared)
         root_packet = json.loads(
             (self.job / "reference_suggestions.packet.json").read_text(
@@ -576,6 +628,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         )
         plan_path = self.job / root_packet["batch_plan"]["path"]
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        self.assertEqual(plan["worker_batch_size"], 4)
         self.assertGreater(len(plan["batches"]), 1)
         covered = [
             segment_id
@@ -725,7 +778,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
                     review_artifact=review,
                 )
 
-    def test_verifier_instruction_bytes_count_toward_worker_budget(self):
+    def test_verifier_instruction_bytes_are_measured_without_rejection(self):
         self.prepare_candidates()
         oversized = Path(self.tempdir.name) / "oversized_suggestion_review.md"
         oversized.write_bytes(b"x" * 100_000)
@@ -735,13 +788,17 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             "SUGGESTION_REVIEW_INSTRUCTIONS_PATH",
             oversized,
         ):
-            with self.assertRaisesRegex(ValueError, "exceeding budget 100000"):
-                lqe_suggestion_review._load_live_chain(
-                    self.job,
-                    "state.json",
-                    "errors.json",
-                    command="suggestion-review-prepare",
-                )
+            chain = lqe_suggestion_review._load_live_chain_plan(
+                self.job,
+                "state.json",
+                "errors.json",
+                command="suggestion-review-prepare",
+            )
+            measurement = lqe_suggestion_review._review_input_measurement(
+                chain[-1]
+            )
+        self.assertGreater(measurement["largest_worker_input_bytes"], 100_000)
+        self.assertEqual(measurement["mode"], "advisory")
 
     def test_publish_rebuilds_and_rejects_tampered_worker_context(self):
         prepared = self.run_script(SUGGESTIONS, "prepare", "--job", self.job)
@@ -793,7 +850,7 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("manifest digest mismatch", result.stderr)
 
-    def test_generation_total_worker_input_budget_is_100000_bytes(self):
+    def test_generation_input_over_100000_is_measured_without_rejection(self):
         (self.job / "sg.md").write_text("x" * 100_001, encoding="utf-8")
         state = json.loads((self.job / "state.json").read_text(encoding="utf-8"))
         payload = (self.job / "sg.md").read_bytes()
@@ -810,8 +867,27 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         write_json(self.job / "state.json", state)
 
         result = self.run_script(SUGGESTIONS, "prepare", "--job", self.job)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("exceeding budget 100000", result.stderr)
+        self.assert_ok(result)
+        packet = json.loads(
+            (self.job / "reference_suggestions.packet.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertNotIn("batch_plan", packet)
+        manifest = json.loads(
+            (self.job / "suggestion_context" / "worker_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIsNone(manifest["budget"]["max_bytes"])
+        self.assertEqual(manifest["budget"]["status"], "advisory")
+        measurement = json.loads(
+            (self.job / "suggestion_context" / "input_measurement.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertGreater(measurement["largest_worker_input_bytes"], 100_000)
+        self.assertIn("advisory", result.stdout)
 
     def test_verifier_draft_cannot_modify_candidate_text(self):
         self.prepare_candidates()

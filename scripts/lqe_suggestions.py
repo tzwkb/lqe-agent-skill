@@ -34,6 +34,7 @@ from lqe_engine import (
 from lqe_paths import write_json_atomic
 from lqe_result_contract import result_contract_path, validate_result_contract
 from lqe_split_contract import canonical_digest
+from lqe_target_form import load_target_form_policy
 from lqe_context_bundle import (
     ContextBundleError,
     build_context_bundle,
@@ -41,6 +42,7 @@ from lqe_context_bundle import (
     build_worker_context_manifest,
     load_project_context_assets,
     load_selected_context_evidence_index,
+    measure_complete_worker_input_bytes,
     normalize_module_view,
     validate_context_bundle_set,
     validate_worker_context_manifest,
@@ -77,18 +79,19 @@ DRAFT_NAME = "reference_suggestions.draft.json"
 CANDIDATE_NAME = "reference_suggestions.candidates.json"
 ARTIFACT_NAME = "reference_suggestions.json"
 DEFAULT_SUGGESTION_SEVERITIES = ("Critical", "Major")
-MAX_SUGGESTION_CONTEXT_BYTES = 100_000
 SUGGESTION_CONTEXT_DIR = "suggestion_context"
 SUGGESTION_BUNDLE_SET_NAME = "bundle_set.json"
 SUGGESTION_WORKER_MANIFEST_NAME = "worker_manifest.json"
 SUGGESTION_CONTENT_INDEX_NAME = "content_index.json"
 SUGGESTION_BATCH_PLAN_NAME = "batch_plan.json"
+SUGGESTION_INPUT_MEASUREMENT_NAME = "input_measurement.json"
 SUGGESTION_BATCH_ROOT = "suggestion_context/batches"
 SELECTED_EVIDENCE_INDEX_PATH = "review_packets/selected_evidence_index.json"
 SUGGESTION_REVIEW_INSTRUCTIONS_PATH = (
     Path(__file__).resolve().parents[1] / "references" / "suggestion_review.md"
 )
 _UNBOUND_WORKER_CONTEXT_DIGEST = "0" * 64
+_WORKER_BATCH_SIZE_UNSET = object()
 
 SCHEMA_ROOT = Path(__file__).resolve().parents[1] / "schemas" / "suggestions"
 SCHEMA_FILES = {
@@ -151,37 +154,31 @@ def _worker_packet_basis(packet: dict) -> dict:
     )
 
 
-def enforce_suggestion_worker_budget(
+def measure_suggestion_worker_input(
     worker_manifest: dict,
+    context_bundle_set: dict,
     packet: dict,
     *,
     label: str,
-    additional_raw_bytes: int = 0,
+    additional_inputs: tuple[object, ...] | list[object] = (),
 ) -> int:
-    if type(additional_raw_bytes) is not int or additional_raw_bytes < 0:
-        raise ValueError(f"{label} additional raw bytes must be a non-negative integer")
-    manifest = validate_worker_context_manifest(worker_manifest)
-    budget = manifest["budget"]
-    if budget["max_bytes"] != MAX_SUGGESTION_CONTEXT_BYTES:
-        raise ValueError(
-            f"{label} worker context budget is not "
-            f"{MAX_SUGGESTION_CONTEXT_BYTES} bytes"
+    try:
+        return measure_complete_worker_input_bytes(
+            worker_manifest,
+            context_bundle_set,
+            [packet],
+            additional_inputs=additional_inputs,
         )
-    base_bytes = budget["measured_bytes"] - manifest["packet_payloads"]["bytes"]
-    if base_bytes < 0:
-        raise ValueError(f"{label} worker context byte accounting is invalid")
-    measured = (
-        base_bytes
-        + _canonical_size([packet])
-        + _canonical_size(manifest)
-        + additional_raw_bytes
-    )
-    if measured > MAX_SUGGESTION_CONTEXT_BYTES:
-        raise ValueError(
-            f"{label} worker input is {measured} bytes, exceeding budget "
-            f"{MAX_SUGGESTION_CONTEXT_BYTES}; split the batch"
-        )
-    return measured
+    except ContextBundleError as exc:
+        raise ValueError(f"{label} worker context byte accounting: {exc}") from exc
+
+
+def _normalize_worker_batch_size(value: object) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or value < 1:
+        raise ValueError("worker batch size must be a positive integer")
+    return value
 
 
 def _with_digest(payload: dict, field: str) -> dict:
@@ -733,6 +730,7 @@ def _load_checker_selected_evidence(
     entries_by_segment = {}
     matched_bundle_keys = set()
     checker_worker_receipts = set()
+    checker_worker_receipts_by_segment = {}
     for entry in index["entries"]:
         key = (entry["module"], entry["context_bundle_digest"])
         record = bundle_records.get(key)
@@ -779,6 +777,9 @@ def _load_checker_selected_evidence(
         worker_id = worker_receipt["worker_id"]
         run_id = worker_receipt["run_id"]
         checker_worker_receipts.add((worker_id, run_id))
+        checker_worker_receipts_by_segment.setdefault(
+            entry["segment_id"], set()
+        ).add((worker_id, run_id))
         matched_bundle_keys.add(key)
         entries_by_segment.setdefault(entry["segment_id"], []).append({
             **record,
@@ -803,6 +804,15 @@ def _load_checker_selected_evidence(
             {"worker_id": worker_id, "run_id": run_id}
             for worker_id, run_id in sorted(checker_worker_receipts)
         ],
+        "checker_worker_receipts_by_segment": {
+            segment_id: [
+                {"worker_id": worker_id, "run_id": run_id}
+                for worker_id, run_id in sorted(receipts)
+            ]
+            for segment_id, receipts in sorted(
+                checker_worker_receipts_by_segment.items()
+            )
+        },
     }
 
 
@@ -956,12 +966,103 @@ def _suggestion_verifier_instruction_input() -> tuple[dict, bytes]:
     )
 
 
+def _review_packet_worker_receipts(
+    generation_packet: dict,
+    candidate_artifact: dict,
+) -> tuple[list[dict], list[dict]]:
+    def canonical_list(value: object, *, label: str) -> tuple[list[dict], set[tuple[str, str]]]:
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"{label} are missing")
+        receipts = [
+            _worker_receipt(item, label=f"{label} item")
+            for item in value
+        ]
+        pairs = {
+            (item["worker_id"], item["run_id"])
+            for item in receipts
+        }
+        if len(pairs) != len(receipts):
+            raise ValueError(f"{label} contain duplicates")
+        return receipts, pairs
+
+    all_generation, all_generation_pairs = canonical_list(
+        candidate_artifact.get("generation_worker_receipts"),
+        label="candidate generation worker receipts",
+    )
+    packet_digest = generation_packet.get("packet_digest")
+    if packet_digest == candidate_artifact.get("generation_packet_digest"):
+        generation_receipts = all_generation
+    else:
+        generation_batches = candidate_artifact.get("generation_batches")
+        if not isinstance(generation_batches, list):
+            raise ValueError("candidate generation batch evidence is missing")
+        matches = [
+            item
+            for item in generation_batches
+            if isinstance(item, dict) and item.get("packet_digest") == packet_digest
+        ]
+        if len(matches) != 1:
+            raise ValueError("generation packet receipt binding is unresolved")
+        match = matches[0]
+        if match.get("reviewed_ids") != generation_packet.get("reviewed_ids"):
+            raise ValueError("generation packet receipt coverage is stale")
+        generation_receipts = [
+            _worker_receipt(
+                match.get("worker_receipt"),
+                label="generation batch worker receipt",
+            )
+        ]
+    generation_pairs = {
+        (item["worker_id"], item["run_id"])
+        for item in generation_receipts
+    }
+    if (
+        len(generation_pairs) != len(generation_receipts)
+        or not generation_pairs.issubset(all_generation_pairs)
+    ):
+        raise ValueError("generation packet worker receipts are stale")
+
+    if "selected_evidence_index" not in candidate_artifact:
+        if (
+            generation_packet.get("selected_evidence_index") is not None
+            or generation_packet.get("checker_worker_receipts") is not None
+        ):
+            raise ValueError("generation packet has unexpected checker evidence")
+        return copy.deepcopy(generation_receipts), []
+
+    if generation_packet.get("selected_evidence_index") != candidate_artifact[
+        "selected_evidence_index"
+    ]:
+        raise ValueError("generation packet selected evidence is stale")
+    all_checkers, all_checker_pairs = canonical_list(
+        candidate_artifact.get("checker_worker_receipts"),
+        label="candidate checker worker receipts",
+    )
+    checker_receipts, checker_pairs = canonical_list(
+        generation_packet.get("checker_worker_receipts"),
+        label="generation packet checker worker receipts",
+    )
+    if not checker_pairs.issubset(all_checker_pairs):
+        raise ValueError("generation packet checker worker receipts are stale")
+    for generation in generation_receipts:
+        for checker in checker_receipts:
+            if (
+                generation["worker_id"] == checker["worker_id"]
+                or generation["run_id"] == checker["run_id"]
+            ):
+                raise ValueError("generation packet worker overlaps a checker worker")
+    return copy.deepcopy(generation_receipts), copy.deepcopy(checker_receipts)
+
+
 def build_suggestion_review_packet(
     generation_packet: dict,
     candidate_artifact: dict,
     *,
     included_review_ids: set[int] | None = None,
 ) -> dict:
+    generation_worker_receipts, checker_worker_receipts = (
+        _review_packet_worker_receipts(generation_packet, candidate_artifact)
+    )
     generation_worker_context = generation_packet.get("instructions", {}).get(
         "worker_context", {}
     )
@@ -1033,17 +1134,13 @@ def build_suggestion_review_packet(
         },
         "reviewed_ids": reviewed_ids,
         "candidate_artifact_digest": candidate_artifact["artifact_digest"],
-        "generation_worker_receipts": copy.deepcopy(
-            candidate_artifact["generation_worker_receipts"]
-        ),
+        "generation_worker_receipts": generation_worker_receipts,
         **(
             {
                 "selected_evidence_index": copy.deepcopy(
                     candidate_artifact["selected_evidence_index"]
                 ),
-                "checker_worker_receipts": copy.deepcopy(
-                    candidate_artifact["checker_worker_receipts"]
-                ),
+                "checker_worker_receipts": checker_worker_receipts,
             }
             if "selected_evidence_index" in candidate_artifact
             else {}
@@ -1062,6 +1159,9 @@ def build_suggestion_review_packet(
             "verify_confirmed_constraints": True,
             "verifier_instructions": verifier_instructions,
             "worker_context": {
+                "input_measurement_path": (
+                    "suggestion_review_context/input_measurement.json"
+                ),
                 "manifest_path": generation_worker_context.get(
                     "manifest_path",
                     "suggestion_context/worker_manifest.json",
@@ -1413,7 +1513,9 @@ def build_suggestion_packet(
     included_review_ids: set[int] | None = None,
     context_rel_dir: str = SUGGESTION_CONTEXT_DIR,
     selected_evidence_contract: dict | None = None,
+    worker_batch_size: int | None = None,
 ) -> dict:
+    worker_batch_size = _normalize_worker_batch_size(worker_batch_size)
     worker_context_manifest_digest = _require_digest(
         worker_context_manifest_digest,
         "worker context manifest digest",
@@ -1451,7 +1553,7 @@ def build_suggestion_packet(
         if selected_evidence_contract is not None
         else None
     )
-    checker_worker_receipts = (
+    all_checker_worker_receipts = (
         [
             _worker_receipt(receipt, label="checker worker receipt")
             for receipt in selected_evidence_contract["checker_worker_receipts"]
@@ -1459,10 +1561,45 @@ def build_suggestion_packet(
         if selected_evidence_contract is not None
         else []
     )
-    if len({(item["worker_id"], item["run_id"]) for item in checker_worker_receipts}) != len(
-        checker_worker_receipts
+    all_checker_receipt_pairs = {
+        (item["worker_id"], item["run_id"])
+        for item in all_checker_worker_receipts
+    }
+    if len(all_checker_receipt_pairs) != len(
+        all_checker_worker_receipts
     ):
         raise ValueError("checker worker receipts contain duplicates")
+    checker_receipts_by_segment = {}
+    if selected_evidence_contract is not None:
+        raw_receipts_by_segment = selected_evidence_contract.get(
+            "checker_worker_receipts_by_segment"
+        )
+        if not isinstance(raw_receipts_by_segment, dict):
+            raise ValueError("checker worker receipt segment bindings are missing")
+        for segment_id, raw_receipts in raw_receipts_by_segment.items():
+            if type(segment_id) is not int or not isinstance(raw_receipts, list):
+                raise ValueError("checker worker receipt segment bindings are invalid")
+            receipts = [
+                _worker_receipt(
+                    receipt,
+                    label=f"checker worker receipt for segment {segment_id}",
+                )
+                for receipt in raw_receipts
+            ]
+            receipt_pairs = {
+                (receipt["worker_id"], receipt["run_id"])
+                for receipt in receipts
+            }
+            if (
+                not receipts
+                or len(receipt_pairs) != len(receipts)
+                or not receipt_pairs.issubset(all_checker_receipt_pairs)
+            ):
+                raise ValueError(
+                    "checker worker receipt segment bindings are stale"
+                )
+            checker_receipts_by_segment[segment_id] = receipts
+    selected_checker_receipt_pairs = set()
     required_checker_modules = set(required_modules(state or {}))
     for segment in segments:
         entry = by_id[segment["id"]]
@@ -1492,6 +1629,16 @@ def build_suggestion_packet(
             selected_union = selected_evidence_contract["segment_unions"].get(
                 representative
             )
+            evidence_receipts = checker_receipts_by_segment.get(representative)
+            if selected_union is not None:
+                if not evidence_receipts:
+                    raise ValueError(
+                        f"suggestion segment {segment_id!r} lacks checker receipt bindings"
+                    )
+                selected_checker_receipt_pairs.update(
+                    (receipt["worker_id"], receipt["run_id"])
+                    for receipt in evidence_receipts
+                )
             issue_modules = sorted({
                 provenance.get("review_module")
                 for issue in errors
@@ -1627,6 +1774,13 @@ def build_suggestion_packet(
                 item[field] = copy.deepcopy(value)
         projected.append(item)
 
+    checker_worker_receipts = [
+        {"worker_id": worker_id, "run_id": run_id}
+        for worker_id, run_id in sorted(
+            selected_checker_receipt_pairs or all_checker_receipt_pairs
+        )
+    ]
+
     bindings = build_live_bindings(state, segments, manifest, results, job=job)
     if context_bundle_set is not None:
         bindings["context_bundle_set_digest"] = context_bundle_set[
@@ -1701,6 +1855,11 @@ def build_suggestion_packet(
                 ],
             },
             "worker_context": {
+                "worker_batch_size": worker_batch_size,
+                "input_measurement_path": (
+                    f"{SUGGESTION_CONTEXT_DIR}/"
+                    f"{SUGGESTION_INPUT_MEASUREMENT_NAME}"
+                ),
                 "manifest_path": (
                     f"{context_rel_dir}/{SUGGESTION_WORKER_MANIFEST_NAME}"
                 ),
@@ -1771,6 +1930,7 @@ def _verify_results(
         allow_internal_provenance=bound,
         require_internal_provenance=bound,
         review_policy=get_review_policy(state),
+        target_form_policy=load_target_form_policy(state),
     )
 
 
@@ -1826,6 +1986,7 @@ def _build_live_packet_context(
     included_review_ids: set[int] | None = None,
     context_rel_dir: str = SUGGESTION_CONTEXT_DIR,
     selected_evidence_contract: dict | None = None,
+    worker_batch_size: int | None = None,
 ) -> tuple[dict, dict, dict]:
     if not isinstance(state.get("project_asset_snapshot"), dict) or not isinstance(
         state.get("capability_resolution"), dict
@@ -1870,6 +2031,7 @@ def _build_live_packet_context(
         included_review_ids=included_review_ids,
         context_rel_dir=context_rel_dir,
         selected_evidence_contract=selected_evidence_contract,
+        worker_batch_size=worker_batch_size,
     )
     selected_ids = {segment["id"] for segment in preliminary["segments"]}
     selected_segments = [
@@ -1904,13 +2066,14 @@ def _build_live_packet_context(
         included_review_ids=included_review_ids,
         context_rel_dir=context_rel_dir,
         selected_evidence_contract=selected_evidence_contract,
+        worker_batch_size=worker_batch_size,
     )
     try:
         worker_manifest = build_worker_context_manifest(
             state,
             "suggestions",
             bundle_set,
-            max_worker_bytes=MAX_SUGGESTION_CONTEXT_BYTES,
+            max_worker_bytes=None,
             packet_payloads=[_worker_packet_basis(packet_basis)],
             job_root=job,
         )
@@ -1933,6 +2096,7 @@ def _build_live_packet_context(
         included_review_ids=included_review_ids,
         context_rel_dir=context_rel_dir,
         selected_evidence_contract=selected_evidence_contract,
+        worker_batch_size=worker_batch_size,
     )
     bundle_digests = _bundle_digests_by_id(bundle_set)
     for segment in packet["segments"]:
@@ -1944,18 +2108,53 @@ def _build_live_packet_context(
             raise ValueError(
                 f"suggestion segment id {segment['id']!r} context bundle is stale"
             )
-    enforce_suggestion_worker_budget(
+    measure_suggestion_worker_input(
         worker_manifest,
+        bundle_set,
         packet,
         label="suggestion generation",
-        additional_raw_bytes=_canonical_size(content_index),
+        additional_inputs=[content_index],
     )
     return packet, bundle_set, worker_manifest
 
 
-def _is_worker_budget_error(exc: ValueError) -> bool:
-    message = str(exc)
-    return "worker input is" in message and "exceeding budget" in message
+def _prepared_worker_batch_size(job: Path) -> int | None:
+    packet_path = job / PACKET_NAME
+    if not packet_path.is_file():
+        return None
+    packet = read_json(packet_path)
+    value = packet.get("instructions", {}).get("worker_context", {}).get(
+        "worker_batch_size"
+    )
+    return _normalize_worker_batch_size(value)
+
+
+def _generation_worker_input_bytes(
+    job: Path,
+    state: dict,
+    packet: dict,
+    bundle_set: dict,
+    worker_manifest: dict,
+) -> int:
+    content_path = packet.get("content_index", {}).get("path")
+    if not isinstance(content_path, str):
+        raise ValueError("suggestion content index binding is missing")
+    relative = Path(content_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("suggestion content index path is unsafe")
+    content_index = build_suggestion_content_index(
+        job,
+        state,
+        context_rel_dir=relative.parent.as_posix(),
+        selected_evidence_index=packet.get("selected_evidence_index"),
+    )
+    return measure_suggestion_worker_input(
+        worker_manifest,
+        bundle_set,
+        packet,
+        label="suggestion generation",
+        additional_inputs=[content_index],
+    )
 
 
 def _build_live_packet_plan(
@@ -1965,34 +2164,13 @@ def _build_live_packet_plan(
     manifest: dict | None,
     results: list[dict],
     selection: object | None,
+    *,
+    worker_batch_size: object = _WORKER_BATCH_SIZE_UNSET,
 ) -> dict:
+    if worker_batch_size is _WORKER_BATCH_SIZE_UNSET:
+        worker_batch_size = _prepared_worker_batch_size(job)
+    worker_batch_size = _normalize_worker_batch_size(worker_batch_size)
     selected_evidence_contract = _load_checker_selected_evidence(job, state)
-    try:
-        packet, bundle_set, worker_manifest = _build_live_packet_context(
-            job,
-            state,
-            segments,
-            manifest,
-            results,
-            selection,
-            selected_evidence_contract=selected_evidence_contract,
-        )
-    except ValueError as exc:
-        if not _is_worker_budget_error(exc):
-            raise
-    else:
-        return {
-            "mode": "single",
-            "root_packet": packet,
-            "batches": [{
-                "batch_id": "batch_0001",
-                "packet": packet,
-                "bundle_set": bundle_set,
-                "worker_manifest": worker_manifest,
-                "context_rel_dir": SUGGESTION_CONTEXT_DIR,
-            }],
-            "batch_plan": None,
-        }
 
     context_view_basis = build_suggestion_context_view(state)
     if selected_evidence_contract is not None:
@@ -2027,67 +2205,41 @@ def _build_live_packet_plan(
         context_view_basis=context_view_basis,
         content_index=root_content_index,
         selected_evidence_contract=selected_evidence_contract,
+        worker_batch_size=worker_batch_size,
     )
     viable_ids = [segment["id"] for segment in preliminary["segments"]]
-    if not viable_ids:
-        raise ValueError(
-            "suggestion worker input exceeds budget before any candidate segment"
+    if worker_batch_size is None or len(viable_ids) <= worker_batch_size:
+        packet, bundle_set, worker_manifest = _build_live_packet_context(
+            job,
+            state,
+            segments,
+            manifest,
+            results,
+            selection,
+            selected_evidence_contract=selected_evidence_contract,
+            worker_batch_size=worker_batch_size,
         )
+        worker_input_bytes = _generation_worker_input_bytes(
+            job, state, packet, bundle_set, worker_manifest
+        )
+        return {
+            "mode": "single",
+            "root_packet": packet,
+            "batches": [{
+                "batch_id": "batch_0001",
+                "packet": packet,
+                "bundle_set": bundle_set,
+                "worker_manifest": worker_manifest,
+                "context_rel_dir": SUGGESTION_CONTEXT_DIR,
+                "worker_input_bytes": worker_input_bytes,
+            }],
+            "batch_plan": None,
+        }
 
-    grouped_ids: list[list[int]] = []
-    current: list[int] = []
-    for segment_id in viable_ids:
-        trial = [*current, segment_id]
-        batch_index = len(grouped_ids) + 1
-        context_rel_dir = f"{SUGGESTION_BATCH_ROOT}/batch_{batch_index:04d}"
-        try:
-            _build_live_packet_context(
-                job,
-                state,
-                segments,
-                manifest,
-                results,
-                selection,
-                included_review_ids=set(trial),
-                context_rel_dir=context_rel_dir,
-                selected_evidence_contract=selected_evidence_contract,
-            )
-        except ValueError as exc:
-            if not _is_worker_budget_error(exc):
-                raise
-            if not current:
-                raise ValueError(
-                    f"suggestion segment {segment_id} is an indivisible worker "
-                    f"input exceeding budget {MAX_SUGGESTION_CONTEXT_BYTES}"
-                ) from exc
-            grouped_ids.append(current)
-            current = [segment_id]
-            batch_index = len(grouped_ids) + 1
-            context_rel_dir = f"{SUGGESTION_BATCH_ROOT}/batch_{batch_index:04d}"
-            try:
-                _build_live_packet_context(
-                    job,
-                    state,
-                    segments,
-                    manifest,
-                    results,
-                    selection,
-                    included_review_ids={segment_id},
-                    context_rel_dir=context_rel_dir,
-                    selected_evidence_contract=selected_evidence_contract,
-                )
-            except ValueError as single_exc:
-                if _is_worker_budget_error(single_exc):
-                    raise ValueError(
-                        f"suggestion segment {segment_id} is an indivisible worker "
-                        f"input exceeding budget {MAX_SUGGESTION_CONTEXT_BYTES}"
-                    ) from single_exc
-                raise
-        else:
-            current = trial
-    if current:
-        grouped_ids.append(current)
-
+    grouped_ids = [
+        viable_ids[index:index + worker_batch_size]
+        for index in range(0, len(viable_ids), worker_batch_size)
+    ]
     batches = []
     batch_records = []
     for index, reviewed_ids in enumerate(grouped_ids, start=1):
@@ -2103,6 +2255,10 @@ def _build_live_packet_plan(
             included_review_ids=set(reviewed_ids),
             context_rel_dir=context_rel_dir,
             selected_evidence_contract=selected_evidence_contract,
+            worker_batch_size=worker_batch_size,
+        )
+        worker_input_bytes = _generation_worker_input_bytes(
+            job, state, packet, bundle_set, worker_manifest
         )
         batches.append({
             "batch_id": batch_id,
@@ -2110,6 +2266,7 @@ def _build_live_packet_plan(
             "bundle_set": bundle_set,
             "worker_manifest": worker_manifest,
             "context_rel_dir": context_rel_dir,
+            "worker_input_bytes": worker_input_bytes,
         })
         batch_records.append({
             "batch_id": batch_id,
@@ -2131,27 +2288,12 @@ def _build_live_packet_plan(
             ),
             "content_index_digest": packet["content_index"]["digest"],
             "draft_path": f"{context_rel_dir}/generation.draft.json",
-            "worker_input_bytes": enforce_suggestion_worker_budget(
-                worker_manifest,
-                packet,
-                label=f"suggestion generation {batch_id}",
-                additional_raw_bytes=_canonical_size(
-                    build_suggestion_content_index(
-                        job,
-                        state,
-                        context_rel_dir=context_rel_dir,
-                        selected_evidence_index=(
-                            selected_evidence_contract["binding"]
-                            if selected_evidence_contract is not None
-                            else None
-                        ),
-                    )
-                ),
-            ),
+            "worker_input_bytes": worker_input_bytes,
         })
     plan = {
         "schema": "lqe.suggestion-generation-batch-plan",
         "version": 1,
+        "worker_batch_size": worker_batch_size,
         "selection": copy.deepcopy(preliminary["selection"]),
         "reviewed_ids": copy.deepcopy(preliminary["reviewed_ids"]),
         "worker_reviewed_ids": viable_ids,
@@ -2189,6 +2331,10 @@ def _build_live_packet_plan(
         "batch_count": len(batch_records),
     }
     root_packet["instructions"]["worker_context"] = {
+        "worker_batch_size": worker_batch_size,
+        "input_measurement_path": (
+            f"{SUGGESTION_CONTEXT_DIR}/{SUGGESTION_INPUT_MEASUREMENT_NAME}"
+        ),
         "batch_plan_path": root_packet["batch_plan"]["path"],
         "batch_plan_digest": plan["batch_plan_digest"],
         "worker_reads_root_packet": False,
@@ -2217,7 +2363,36 @@ def _build_live_packet_plan(
     }
 
 
+def _suggestion_input_measurement(packet_plan: dict) -> dict:
+    batches = [{
+        "batch_id": batch["batch_id"],
+        "reviewed_ids": [
+            segment["id"] for segment in batch["packet"]["segments"]
+        ],
+        "worker_input_bytes": batch["worker_input_bytes"],
+    } for batch in packet_plan["batches"]]
+    values = [batch["worker_input_bytes"] for batch in batches]
+    payload = {
+        "schema": "lqe.suggestion-worker-input-measurement",
+        "version": 1,
+        "mode": "advisory",
+        "decision_owner": "main_agent",
+        "worker_batch_size": packet_plan["root_packet"]["instructions"][
+            "worker_context"
+        ].get("worker_batch_size"),
+        "batches": batches,
+        "total_worker_input_bytes": sum(values),
+        "largest_worker_input_bytes": max(values, default=0),
+    }
+    payload["measurement_digest"] = canonical_digest(payload)
+    return payload
+
+
 def _write_packet_plan(job: Path, state: dict, packet_plan: dict) -> None:
+    write_json_atomic(
+        job / SUGGESTION_CONTEXT_DIR / SUGGESTION_INPUT_MEASUREMENT_NAME,
+        _suggestion_input_measurement(packet_plan),
+    )
     if packet_plan["mode"] == "single":
         batch = packet_plan["batches"][0]
         context_dir = job / SUGGESTION_CONTEXT_DIR
@@ -2272,6 +2447,14 @@ def require_persisted_packet_plan(job: Path, packet_plan: dict) -> None:
     root_path = job / PACKET_NAME
     if not root_path.is_file() or read_json(root_path) != packet_plan["root_packet"]:
         raise ValueError("prepared suggestion root packet is stale")
+    measurement_path = (
+        job / SUGGESTION_CONTEXT_DIR / SUGGESTION_INPUT_MEASUREMENT_NAME
+    )
+    if (
+        not measurement_path.is_file()
+        or read_json(measurement_path) != _suggestion_input_measurement(packet_plan)
+    ):
+        raise ValueError("prepared suggestion input measurement is stale")
     if packet_plan["mode"] == "single":
         batch = packet_plan["batches"][0]
         require_persisted_suggestion_context(
@@ -2683,12 +2866,14 @@ def _candidate_route(
     reference_target: object,
     source_semantics: dict,
     tone_decision: dict,
+    target_form_policy: dict | None = None,
 ) -> tuple[dict, dict | None]:
     try:
         validated = validate_reference_target(
             segment,
             reference_target,
             label=f"reference suggestion candidate {segment['id']}",
+            target_form_policy=target_form_policy,
         )
     except CheckFormatError:
         return ({
@@ -2756,6 +2941,7 @@ def _build_candidate_artifact_payload(
     segments: list[dict],
     *,
     generation_batches: list[dict] | None = None,
+    target_form_policy: dict | None = None,
 ) -> dict:
     segment_map = {segment["id"]: segment for segment in segments}
     packet_segments = {segment["id"]: segment for segment in packet["segments"]}
@@ -2781,6 +2967,7 @@ def _build_candidate_artifact_payload(
             draft_entry["reference_target"],
             draft_entry["source_semantics"],
             draft_entry["tone_decision"],
+            target_form_policy,
         )
         routes.append(route)
         if candidate is not None:
@@ -2840,7 +3027,12 @@ def _build_candidate_artifact_payload(
     )
     payload = _with_digest(payload, "artifact_digest")
     _validate_schema(payload, CANDIDATE_SCHEMA, CANDIDATE_VERSION)
-    validate_candidate_artifact(payload, packet, segments)
+    validate_candidate_artifact(
+        payload,
+        packet,
+        segments,
+        target_form_policy=target_form_policy,
+    )
     return payload
 
 
@@ -2848,6 +3040,8 @@ def build_candidate_artifact(
     packet: dict,
     draft: dict,
     segments: list[dict],
+    *,
+    target_form_policy: dict | None = None,
 ) -> dict:
     validate_generation_draft(draft, packet)
     return _build_candidate_artifact_payload(
@@ -2858,6 +3052,7 @@ def build_candidate_artifact(
         [copy.deepcopy(draft["worker_receipt"])],
         canonical_digest(draft),
         segments,
+        target_form_policy=target_form_policy,
     )
 
 
@@ -2866,6 +3061,8 @@ def build_candidate_artifact_from_batches(
     batches: list[dict],
     drafts: list[dict],
     segments: list[dict],
+    *,
+    target_form_policy: dict | None = None,
 ) -> dict:
     if len(batches) != len(drafts) or len(batches) < 2:
         raise ValueError("suggestion generation batch draft count is invalid")
@@ -2928,6 +3125,7 @@ def build_candidate_artifact_from_batches(
         canonical_digest([canonical_digest(draft) for draft in drafts]),
         segments,
         generation_batches=batch_evidence,
+        target_form_policy=target_form_policy,
     )
 
 
@@ -2935,6 +3133,8 @@ def validate_candidate_artifact(
     artifact: object,
     packet: dict,
     segments: list[dict],
+    *,
+    target_form_policy: dict | None = None,
 ) -> dict:
     _validate_schema(artifact, CANDIDATE_SCHEMA, CANDIDATE_VERSION)
     _validate_self_digest(artifact, "artifact_digest", "candidate artifact")
@@ -3075,6 +3275,7 @@ def validate_candidate_artifact(
             segment_map[entry["id"]],
             entry["reference_target"],
             label=f"candidate artifact id {entry['id']}",
+            target_form_policy=target_form_policy,
         )
         if route_map[entry["id"]].get("candidate_digest") != entry["candidate_digest"]:
             raise ValueError(f"candidate artifact id {entry['id']} route digest mismatch")
@@ -3084,6 +3285,7 @@ def validate_candidate_artifact(
             entry["reference_target"],
             entry["source_semantics"],
             entry["tone_decision"],
+            target_form_policy,
         )
         if expected_candidate != entry:
             raise ValueError(
@@ -3104,6 +3306,7 @@ def validate_suggestion_artifact(
     candidate_artifact: dict | None = None,
     review_artifact: dict | None = None,
     review_packet: dict | None = None,
+    target_form_policy: dict | None = None,
 ) -> dict[int, str]:
     _validate_schema(artifact, ARTIFACT_SCHEMA, ARTIFACT_VERSION)
     _validate_self_digest(artifact, "artifact_digest", "final suggestion artifact")
@@ -3196,6 +3399,7 @@ def validate_suggestion_artifact(
             segment_map[entry["id"]],
             entry["reference_target"],
             label=f"final suggestion artifact id {entry['id']}",
+            target_form_policy=target_form_policy,
         )
         if entry["candidate_digest"] != canonical_digest({
             key: copy.deepcopy(entry[key])
@@ -3396,7 +3600,13 @@ def load_reference_suggestions(
     if not candidate_path.is_file():
         raise ValueError("reference suggestion candidate artifact is missing")
     candidate = read_json(candidate_path)
-    validate_candidate_artifact(candidate, packet, segments)
+    target_form_policy = load_target_form_policy(state)
+    validate_candidate_artifact(
+        candidate,
+        packet,
+        segments,
+        target_form_policy=target_form_policy,
+    )
     review = None
     review_packet = None
     review_path = Path(job) / "suggestion_review.json"
@@ -3417,6 +3627,7 @@ def load_reference_suggestions(
         candidate_artifact=candidate,
         review_artifact=review,
         review_packet=review_packet,
+        target_form_policy=target_form_policy,
     )
 
 
@@ -3449,16 +3660,20 @@ def cmd_prepare(args) -> None:
         manifest,
         results,
         selection,
+        worker_batch_size=args.worker_batch_size,
     )
     packet = packet_plan["root_packet"]
     output = Path(args.out) if args.out else job / PACKET_NAME
     _write_packet_plan(job, state, packet_plan)
     write_json_atomic(output, packet)
+    measurement = _suggestion_input_measurement(packet_plan)
     print(
         f"[lqe_suggestions] Generation packet → {output} "
         f"({len(packet['segments'])} generation candidate(s), "
         f"{len(packet['excluded_segments'])} hard rejected, "
-        f"{len(packet_plan['batches'])} worker batch(es))"
+        f"{len(packet_plan['batches'])} worker batch(es), "
+        f"largest measured {measurement['largest_worker_input_bytes']} bytes, "
+        f"total {measurement['total_worker_input_bytes']} bytes; advisory)"
     )
 
 
@@ -3496,7 +3711,12 @@ def cmd_publish_candidates(args) -> None:
     if packet_plan["mode"] == "single":
         if draft is None:
             raise ValueError("single-batch suggestion draft must be a JSON file")
-        artifact = build_candidate_artifact(packet, draft, segments)
+        artifact = build_candidate_artifact(
+            packet,
+            draft,
+            segments,
+            target_form_policy=load_target_form_policy(state),
+        )
     else:
         if not input_path.is_dir():
             raise ValueError(
@@ -3515,6 +3735,7 @@ def cmd_publish_candidates(args) -> None:
             packet_plan["batches"],
             drafts,
             segments,
+            target_form_policy=load_target_form_policy(state),
         )
     output = Path(args.out) if args.out else job / CANDIDATE_NAME
     write_json_atomic(output, artifact)
@@ -3542,7 +3763,13 @@ def cmd_validate(args) -> None:
     require_persisted_packet_plan(job, packet_plan)
     packet = packet_plan["root_packet"]
     candidate = read_json(job / CANDIDATE_NAME)
-    validate_candidate_artifact(candidate, packet, segments)
+    target_form_policy = load_target_form_policy(state)
+    validate_candidate_artifact(
+        candidate,
+        packet,
+        segments,
+        target_form_policy=target_form_policy,
+    )
     review_path = job / "suggestion_review.json"
     review = read_json(review_path) if review_path.is_file() else None
     review_packet = None
@@ -3562,6 +3789,7 @@ def cmd_validate(args) -> None:
         candidate_artifact=candidate,
         review_artifact=review,
         review_packet=review_packet,
+        target_form_policy=target_form_policy,
     )
     print(f"[lqe_suggestions] Valid v5 final → {artifact_path} ({len(suggestions)} suggestion(s))")
 
@@ -3581,6 +3809,14 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--categories")
             command.add_argument("--severities", default=None)
             command.add_argument("--only-missing", action="store_true")
+            command.add_argument(
+                "--worker-batch-size",
+                type=int,
+                help=(
+                    "agent-selected maximum candidate count per worker; "
+                    "omit for one advisory-measured batch"
+                ),
+            )
             command.set_defaults(func=cmd_prepare)
         elif name == "publish-candidates":
             command.add_argument("--input", required=True)

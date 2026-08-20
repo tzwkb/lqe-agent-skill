@@ -1,0 +1,114 @@
+{
+  "profile_contract_version": 2,
+  "name": "pop-epoch/en-tr",
+  "language_pair": "en-tr",
+  "source_lang": "en",
+  "target_lang": "tr",
+  "game": "Pop Epoch: Civilization Tycoon",
+  "background": "已上线的移动端文明模拟经营与轻策略游戏。玩家从原始部落起步，跨时代建设文明，通过建造与资源生产、工业扩张、科技研究、招募跨时代历史人物，以及发展步兵和骑兵等军力来推进时代、守卫领地并参与征服。整体采用风格化、轻快且鼓舞式的表达。EN→TR 面向土耳其发行；公开土耳其区商店文案仅用于理解产品与市场，不等同于客户确认术语或既有游戏内权威译文。",
+  "style_guide": "sg.md",
+  "checks": "checks.json",
+  "confirmed_rules": "confirmed_rules.md",
+  "assets": {
+    "style_guide": {
+      "kind": "style_guide",
+      "path": "sg.md",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "advisory"
+      },
+      "provenance": {
+        "kind": "public_research",
+        "retrieved_on": "2026-08-15",
+        "sources": [
+          "https://play.google.com/store/apps/details?id=com.nexwave.popepoch.android&hl=en",
+          "https://play.google.com/store/apps/details?id=com.nexwave.popepoch.android&hl=tr&gl=TR",
+          "https://popepoch.nex-wave-tech.com/"
+        ]
+      },
+      "distribution": "public_allowed",
+      "availability": "included",
+      "description": "Public-source EN-TR localization baseline; not a client-approved style guide.",
+      "media_type": "text/markdown"
+    },
+    "checks": {
+      "kind": "checks",
+      "path": "checks.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "profile_setup",
+        "created_on": "2026-08-15"
+      },
+      "distribution": "public_allowed",
+      "availability": "included",
+      "description": "Deterministic pre-check overrides for English source and Turkish target.",
+      "media_type": "application/json"
+    },
+    "confirmed_rules": {
+      "kind": "confirmed_rules",
+      "path": "confirmed_rules.md",
+      "required": true,
+      "authority": {
+        "issuer": "user_and_profile_maintainer",
+        "level": "authoritative"
+      },
+      "provenance": {
+        "kind": "user_intake",
+        "confirmed_on": "2026-08-15"
+      },
+      "distribution": "public_allowed",
+      "availability": "included",
+      "description": "Confirmed project scope and explicit absence of additional client rules.",
+      "media_type": "text/markdown"
+    }
+  },
+  "wordcount_basis": "target-words",
+  "protected_term_statuses": [],
+  "scoring_policy": {
+    "threshold": 98,
+    "scorecard_profile": "legacy",
+    "severity_scale": "lisa",
+    "critical_gate": false,
+    "repeat_dedup": true
+  },
+  "context_pipeline": {
+    "mode": "off"
+  },
+  "capabilities": {
+    "context.core@1": {
+      "required": true,
+      "config": {
+        "identity": {
+          "key_columns": [
+            "key",
+            "Key",
+            "文本ID"
+          ],
+          "fallback": "source_coordinate"
+        },
+        "columns": {
+          "content_type": [
+            "content_type",
+            "text_type",
+            "文本类型",
+            "文本类别",
+            "句段类型"
+          ],
+          "context_note": [
+            "context_note",
+            "上下文备注",
+            "语境备注"
+          ]
+        }
+      }
+    },
+    "source_provenance@1": {
+      "required": true
+    }
+  }
+}

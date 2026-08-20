@@ -8,11 +8,11 @@
 - `confirmed_rules.md`：客户已经确认的规则，优先于风格指南和通用规则。
 - 风格指南与语言说明。
 - 当前模块的 `review_packets/<module>/chunk_NN.json`。packet 只保留该模块所需字段，并绑定原 chunk 的指纹。
-- 当前 batch 的 `review_packets/context/<module>/batch_NN/worker_manifest.json` 与 `bundle_set.json`。manifest 中每份可读资料必须通过 `job_relative`、`skill_relative` 或 `embedded_text` locator 取得，并核对摘要和字节数；缺一项、locator 不可安全解析、摘要不符或总输入超限时不得开始审校。packet 只复制 `selected_evidence_index.json` 的路径和摘要作后续交接证明；checker 不把全局索引重复载入本批输入。
-- checker 的 `instructions.suggestions` 固定为 `null`，不得读取建议生成说明。完整 project source manifest 只由 runtime 实时校验；worker 仅读取 manifest 内预算已计入的 canonical compact projection（项目、coverage、source/generated id、kind、authority/availability 等审计字段），不得加载其原始全文。
+- 当前 batch 的 `review_packets/context/<module>/batch_NN/worker_manifest.json` 与 `bundle_set.json`。manifest 中每份可读资料必须通过 `job_relative`、`skill_relative` 或 `embedded_text` locator 取得，并核对摘要和字节数；缺一项、locator 不可安全解析或摘要不符时不得开始审校。完整输入字节只作计量，不由 worker 自行套用固定阈值。packet 只复制 `selected_evidence_index.json` 的路径和摘要作后续交接证明；checker 不把全局索引重复载入本批输入。
+- checker 的 `instructions.suggestions` 固定为 `null`，不得读取建议生成说明。完整 project source manifest 只由 runtime 实时校验；worker 仅读取 manifest 内已计量的 canonical compact projection（项目、coverage、source/generated id、kind、authority/availability 等审计字段），不得加载其原始全文。
 - packet 中的 `review_policy`。`mode=optimized` 执行降本规则，`mode=full` 执行完整规则；不得自行切换。
 
-按 `review_packets/batch_plan.json` 分配有界 worker。每个 worker 只处理一个批次：最多 4 个 packet，同时不超过 25,000 原译字符；instructions、项目资料、共享资产、bundle、manifest 和 packet 的总输入不得超过 100,000 字节。不可再拆的最小单元仍超限时失败，不截断。worker 在批次开始时读取本文件、自己的模块说明和项目上下文；新批次必须新建 worker并重新读取。发生上下文压缩、异常重复判断或连续格式错误时立即重开，不得依赖上一 worker 的记忆作为证据。
+按 `review_packets/batch_plan.json` 分配有界 worker。每个 checker worker 只处理一个批次：最多 4 个 packet，同时不超过 25,000 原译字符。instructions、项目资料、共享资产、bundle、manifest 和 packet 的完整输入字节必须计量，但不设脚本硬上限；主 Agent已在派发前按当前 manifest 的 `measured_bytes` 和组件分解完成本轮判断。任何资料都不得为缩小输入而截断。worker 在批次开始时读取本文件、自己的模块说明和项目上下文；新批次必须新建 worker并重新读取。发生上下文压缩、异常重复判断或连续格式错误时立即重开，不得依赖上一 worker 的记忆作为证据。
 
 ## 默认紧凑草稿
 

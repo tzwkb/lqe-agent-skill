@@ -124,7 +124,7 @@ class ContextBundleError(ValueError):
 
 
 class WorkerContextBudgetError(ContextBundleError):
-    """Raised when a complete worker input exceeds its explicit byte budget."""
+    """Raised when a caller-specific worker batching policy rejects an input."""
 
 
 def _canonical_bytes(value: object, *, label: str = "value") -> bytes:
@@ -2694,16 +2694,12 @@ def calculate_worker_input_bytes(components: Mapping | Sequence) -> int:
 
 
 def enforce_worker_byte_budget(
-    components: Mapping | Sequence, max_bytes: int
+    components: Mapping | Sequence, max_bytes: int | None = None
 ) -> int:
-    if type(max_bytes) is not int or max_bytes < 1:
-        raise ContextBundleError("max worker bytes must be a positive integer")
-    measured = calculate_worker_input_bytes(components)
-    if measured > max_bytes:
-        raise WorkerContextBudgetError(
-            f"worker input is {measured} bytes, exceeding budget {max_bytes}; split the batch"
-        )
-    return measured
+    """Compatibility shim that measures input; ``max_bytes`` is advisory only."""
+
+    _ = max_bytes
+    return calculate_worker_input_bytes(components)
 
 
 def _document_summary(
@@ -3014,7 +3010,7 @@ def verify_worker_context_manifest_resources(
         delivered.setdefault(canonical_digest(locator), payload)
     resource_bytes = sum(len(payload) for payload in delivered.values())
     if resource_bytes != document["budget"]["components"]["readable_resources"]:
-        raise ContextBundleError("worker readable-resource budget mismatch")
+        raise ContextBundleError("worker readable-resource measurement mismatch")
     return document
 
 
@@ -3029,19 +3025,17 @@ def validate_worker_context_manifest(value: object) -> dict:
         document, "worker_context_manifest_digest"
     ):
         raise ContextBundleError("worker context manifest digest mismatch")
-    if document["budget"]["measured_bytes"] > document["budget"]["max_bytes"]:
-        raise ContextBundleError("worker context manifest exceeds its budget")
     components = document["budget"]["components"]
     if document["budget"]["measured_bytes"] != sum(components.values()):
-        raise ContextBundleError("worker context manifest budget components mismatch")
+        raise ContextBundleError("worker context manifest measurement components mismatch")
     if components["shared_context_assets"] != document["shared_context_assets"][
         "bytes"
     ]:
-        raise ContextBundleError("worker shared-context budget mismatch")
+        raise ContextBundleError("worker shared-context measurement mismatch")
     if components["context_bundles"] != document["context_bundles"]["bytes"]:
-        raise ContextBundleError("worker context-bundle budget mismatch")
+        raise ContextBundleError("worker context-bundle measurement mismatch")
     if components["packet_payloads"] != document["packet_payloads"]["bytes"]:
-        raise ContextBundleError("worker packet-payload budget mismatch")
+        raise ContextBundleError("worker packet-payload measurement mismatch")
     for summary in document["source_manifests"]:
         if summary["projection_digest"] != canonical_digest(summary["projection"]):
             raise ContextBundleError("worker source-manifest projection digest mismatch")
@@ -3073,7 +3067,7 @@ def validate_worker_context_manifest(value: object) -> dict:
     if components["source_manifest_projections"] != _component_bytes(
         _source_manifest_projection_input(document["source_manifests"])
     ):
-        raise ContextBundleError("worker source-manifest projection budget mismatch")
+        raise ContextBundleError("worker source-manifest projection measurement mismatch")
     identifier_fields = {
         "project_assets": "asset_id",
         "language_providers": "capability_id",
@@ -3136,12 +3130,74 @@ def validate_worker_context_manifest(value: object) -> dict:
     return document
 
 
+def measure_complete_worker_input_bytes(
+    worker_manifest: Mapping,
+    context_bundle_set: Mapping,
+    packet_payloads: Sequence[object],
+    *,
+    additional_inputs: Sequence[object] = (),
+) -> int:
+    """Measure the complete canonical input actually delivered to one worker."""
+
+    manifest = validate_worker_context_manifest(worker_manifest)
+    bundle_set = validate_context_bundle_set(context_bundle_set)
+    if manifest["module"] != bundle_set["module"]:
+        raise ContextBundleError("worker manifest module differs from bundle set")
+    if (
+        manifest["context_bundles"]["digest"]
+        != bundle_set["context_bundle_set_digest"]
+        or manifest["context_bundles"]["count"] != len(bundle_set["bundles"])
+        or manifest["context_bundles"]["bytes"]
+        != _component_bytes(bundle_set["bundles"])
+    ):
+        raise ContextBundleError("worker manifest bundle-set binding mismatch")
+    if not isinstance(packet_payloads, Sequence) or isinstance(
+        packet_payloads, (str, bytes)
+    ):
+        raise ContextBundleError("worker packet payloads must be an array")
+    packets = list(packet_payloads)
+    if manifest["packet_payloads"]["count"] != len(packets):
+        raise ContextBundleError("worker packet payload count mismatch")
+    if not isinstance(additional_inputs, Sequence) or isinstance(
+        additional_inputs, (str, bytes)
+    ):
+        raise ContextBundleError("additional worker inputs must be an array")
+
+    embedded_resource_bytes = 0
+    seen_embedded_locators = set()
+    for summary in _readable_document_summaries(manifest):
+        locator = summary["locator"]
+        if locator["kind"] != "embedded_text":
+            continue
+        locator_digest = canonical_digest(locator)
+        if locator_digest in seen_embedded_locators:
+            continue
+        seen_embedded_locators.add(locator_digest)
+        embedded_resource_bytes += summary["bytes"]
+    external_resource_bytes = (
+        manifest["budget"]["components"]["readable_resources"]
+        - embedded_resource_bytes
+    )
+    if external_resource_bytes < 0:
+        raise ContextBundleError("worker external-resource measurement is invalid")
+
+    return sum(
+        (
+            _component_bytes(manifest),
+            _component_bytes(bundle_set),
+            sum(_component_bytes(packet) for packet in packets),
+            external_resource_bytes,
+            sum(_component_bytes(item) for item in additional_inputs),
+        )
+    )
+
+
 def build_worker_context_manifest(
     state: Mapping,
     module: str,
     context_bundle_set: Mapping,
     *,
-    max_worker_bytes: int,
+    max_worker_bytes: int | None = None,
     packet_payloads: Sequence[object] = (),
     source_manifest_paths: Mapping[str, object] | None = None,
     common_instructions_path: object | None = None,
@@ -3149,7 +3205,7 @@ def build_worker_context_manifest(
     suggestion_instructions_path: object | None = None,
     job_root: object | None = None,
 ) -> dict:
-    """Bind all worker-visible context and reject an oversized complete input."""
+    """Bind and measure worker input; ``max_worker_bytes`` is compatibility-only."""
 
     snapshot, resolution = _validate_state_bindings(state)
     bundle_set = validate_context_bundle_set(context_bundle_set)
@@ -3281,13 +3337,12 @@ def build_worker_context_manifest(
         "context_bundles": _component_bytes(bundles),
         "packet_payloads": _component_bytes(packets),
     }
-    measured = enforce_worker_byte_budget(
+    measured = calculate_worker_input_bytes(
         list(delivered_payloads.values())
-        + [source_projection_input, shared, bundles, packets],
-        max_worker_bytes,
+        + [source_projection_input, shared, bundles, packets]
     )
     if measured != sum(budget_components.values()):
-        raise ContextBundleError("worker input budget accounting mismatch")
+        raise ContextBundleError("worker input measurement accounting mismatch")
 
     shared_counts = {
         field: len(shared[field])
@@ -3324,10 +3379,10 @@ def build_worker_context_manifest(
             "bytes": _component_bytes(packets),
         },
         "budget": {
-            "max_bytes": max_worker_bytes,
+            "max_bytes": None,
             "measured_bytes": measured,
             "components": budget_components,
-            "status": "within_budget",
+            "status": "advisory",
         },
     }
     manifest["worker_context_manifest_digest"] = canonical_digest(manifest)
@@ -3353,6 +3408,7 @@ __all__ = [
     "enforce_worker_byte_budget",
     "load_project_context_assets",
     "load_selected_context_evidence_index",
+    "measure_complete_worker_input_bytes",
     "normalize_module_view",
     "validate_context_bundle",
     "validate_context_bundle_set",

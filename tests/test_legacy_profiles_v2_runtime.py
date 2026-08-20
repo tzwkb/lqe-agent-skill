@@ -44,6 +44,16 @@ PROFILE_EXPECTATIONS = {
         "assets": {"style_guide", "terminology", "checks", "confirmed_rules"},
     },
 }
+PUBLIC_PROFILE_EXPECTATIONS = {
+    "pop-epoch/en-tr": {
+        "wordcount_basis": "target-words",
+        "assets": {"style_guide", "checks", "confirmed_rules"},
+    },
+}
+ALL_PROFILE_EXPECTATIONS = {
+    **PROFILE_EXPECTATIONS,
+    **PUBLIC_PROFILE_EXPECTATIONS,
+}
 FOUNDATIONS = {"context.core@1", "source_provenance@1"}
 
 
@@ -78,7 +88,7 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
             for path in (ROOT / "projects").glob("*/*/profile.json")
         }
 
-        self.assertTrue(set(PROFILE_EXPECTATIONS) <= actual)
+        self.assertTrue(set(ALL_PROFILE_EXPECTATIONS) <= actual)
 
     def test_v2_core_is_explicit_and_legacy_top_level_paths_are_preserved(self):
         for profile_name, expected in PROFILE_EXPECTATIONS.items():
@@ -123,7 +133,7 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                     )
 
     def test_declared_asset_paths_match_included_and_external_reality(self):
-        for profile_name in PROFILE_EXPECTATIONS:
+        for profile_name in ALL_PROFILE_EXPECTATIONS:
             with self.subTest(profile=profile_name):
                 path, raw = load_profile(profile_name)
                 normalized, inspection, _ = runtime(profile_name)
@@ -152,6 +162,23 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
         source = (ROOT / "scripts" / "run_tests.py").read_text(encoding="utf-8")
 
         self.assertIn('declaration.get("availability") == "external"', source)
+
+    def test_public_profiles_are_distributable_and_contract_valid(self):
+        for profile_name, expected in PUBLIC_PROFILE_EXPECTATIONS.items():
+            with self.subTest(profile=profile_name):
+                _, raw = load_profile(profile_name)
+                normalized = normalize_profile(raw)
+
+                self.assertEqual(raw["profile_contract_version"], 2)
+                self.assertEqual(raw["context_pipeline"], {"mode": "off"})
+                self.assertEqual(raw["wordcount_basis"], expected["wordcount_basis"])
+                self.assertEqual(set(raw["assets"]), expected["assets"])
+                self.assertEqual(set(raw["capabilities"]), FOUNDATIONS)
+                self.assertEqual(normalized["source_lang"], "en")
+                self.assertEqual(normalized["target_lang"], "tr")
+                for declaration in raw["assets"].values():
+                    self.assertEqual(declaration["distribution"], "public_allowed")
+                    self.assertEqual(declaration["availability"], "included")
 
     def test_distribution_and_authority_exceptions_are_explicit(self):
         _, mhg = load_profile("mhg/zh-ko")
@@ -197,7 +224,7 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
 
     def test_off_mode_resolves_only_foundations_and_is_deterministic(self):
         builtins = set(builtin_descriptor_registry())
-        for profile_name in PROFILE_EXPECTATIONS:
+        for profile_name in ALL_PROFILE_EXPECTATIONS:
             with self.subTest(profile=profile_name):
                 normalized, inspection, resolution = runtime(profile_name)
                 statuses = asset_statuses(inspection["snapshot"])

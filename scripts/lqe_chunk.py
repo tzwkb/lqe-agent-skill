@@ -45,6 +45,7 @@ from lqe_paths import (
     write_json_atomic,
 )
 from lqe_result_contract import build_result_contract, result_contract_path
+from lqe_target_form import load_target_form_policy
 from lqe_split_contract import (
     SplitContractError,
     add_chunk_payload_digest,
@@ -1071,6 +1072,7 @@ def _cmd_merge_unlocked(a, state: dict, outdir: Path):
                 allow_internal_provenance=bound_results,
                 require_internal_provenance=bound_results,
                 review_policy=get_review_policy(state),
+                target_form_policy=load_target_form_policy(state),
             )
         )
 
@@ -1170,11 +1172,18 @@ def module_receipt_path(module_path: Path) -> Path:
 
 
 def _normalize_review_provenance(value: object) -> dict:
-    if not isinstance(value, dict) or set(value) != {
+    required_fields = {
         "review_packet_digest",
         "selected_evidence_index_digest",
         "worker_receipt",
-    }:
+    }
+    if not isinstance(value, dict):
+        raise CheckFormatError("module receipt review provenance is invalid")
+    actual_fields = set(value)
+    if actual_fields not in (
+        required_fields,
+        required_fields | {"migration_receipt"},
+    ):
         raise CheckFormatError("module receipt review provenance is invalid")
     for field in ("review_packet_digest", "selected_evidence_index_digest"):
         digest = value.get(field)
@@ -1195,6 +1204,24 @@ def _normalize_review_provenance(value: object) -> dict:
                 raise CheckFormatError(
                     f"module receipt worker_receipt.{field} is invalid"
                 )
+    migration = value.get("migration_receipt")
+    if migration is not None:
+        if (
+            not isinstance(migration, dict)
+            or migration.get("schema")
+            != "lqe.compact-draft-migration-receipt"
+            or migration.get("version") != 1
+            or not isinstance(migration.get("receipt_digest"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", migration["receipt_digest"])
+            is None
+        ):
+            raise CheckFormatError("module receipt migration_receipt is invalid")
+        migration_payload = copy.deepcopy(migration)
+        migration_digest = migration_payload.pop("receipt_digest")
+        if canonical_digest(migration_payload) != migration_digest:
+            raise CheckFormatError(
+                "module receipt migration_receipt digest mismatch"
+            )
     return copy.deepcopy(value)
 
 
