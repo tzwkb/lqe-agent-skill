@@ -1954,6 +1954,7 @@ class SDLXLIFFIntegrationTests(unittest.TestCase):
 
         def replace_asset_then_interrupt(source, target):
             if target.name == "source_manifest.json":
+                self.assertTrue(staged_asset.exists())
                 published_asset = self.job / "sg.txt"
                 published_asset.unlink()
                 published_asset.write_text("competitor", encoding="utf-8")
@@ -1976,6 +1977,7 @@ class SDLXLIFFIntegrationTests(unittest.TestCase):
         competitor = self.job / "sg.txt"
         self.assertEqual(competitor.read_text(encoding="utf-8"), "competitor")
         self.assertEqual({path.name for path in self.job.iterdir()}, {competitor.name})
+        self.assertTrue(staged_asset.exists())
 
     def test_explicit_sdl_directory_ignores_but_records_other_supported_files(self):
         state_path = self.job / "state.json"

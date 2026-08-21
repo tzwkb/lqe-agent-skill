@@ -17,6 +17,10 @@ def load_generator():
     return module
 
 
+@unittest.skipUnless(
+    SCRIPT.is_file(),
+    "NRC internal-only migration generator is not distributed in public checkouts",
+)
 class NRCShadowTermMigrationTests(unittest.TestCase):
     def setUp(self):
         self.module = load_generator()
