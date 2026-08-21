@@ -5,7 +5,7 @@ description: LQE scoring and review workflow for game-localization translations.
 
 # LQE Translator
 
-Run the native scripts. Read only the references required by the current phase. Never edit a formal artifact by hand or silently replace a failed native workflow.
+Run the native scripts. Read only the references required by the current phase. Never edit a formal artifact by hand or silently replace a failed native workflow. Before running any nontrivial CLI command, read [`references/cli.md`](references/cli.md); it is the complete command reference.
 
 ## Required decisions and inputs
 
@@ -108,8 +108,8 @@ Optional SDL profile keys are `"sdlxliff"`, `"tm_protection"`, `"content_type_ru
 2. Run deterministic checks, split, and prepare compact work.
 
 ```bash
-python3 "$SCRIPTS/lqe_io.py" precheck --state "$JOB/state.json" --out "$JOB/errors_precheck.json"
-python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" --precheck "$JOB/errors_precheck.json" --outdir "$JOB/chunks"
+python3 "$SCRIPTS/lqe_io.py" pre-check --state "$JOB/state.json" --out "$JOB/errors_precheck.json"
+python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" --errors "$JOB/errors_precheck.json" --outdir "$JOB/chunks"
 python3 "$SCRIPTS/lqe_review.py" prepare --job "$JOB"
 ```
 
@@ -137,9 +137,27 @@ In optimized mode, Minor 只报告问题 with `needs_confirmation: true` and `ed
 ```bash
 python3 "$SCRIPTS/lqe_calc.py" --state "$JOB/state.json" --errors "$JOB/errors.json" --json
 python3 "$SCRIPTS/lqe_suggestions.py" prepare --job "$JOB" --worker-batch-size 16
-python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates --job "$JOB"
-python3 "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB" --worker-batch-size 16
-python3 "$SCRIPTS/lqe_suggestion_review.py" publish-review --job "$JOB"
+```
+
+Read `suggestion_context/batch_plan.json` and run exactly one matching publication command:
+
+```bash
+# mode: single
+python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates --job "$JOB" --input "$JOB/reference_suggestions.draft.json"
+# mode: batched
+python3 "$SCRIPTS/lqe_suggestions.py" publish-candidates --job "$JOB" --input "$JOB/suggestion_context/batches"
+
+python3 "$SCRIPTS/lqe_suggestion_review.py" prepare --job "$JOB"
+```
+
+Then read `suggestion_review_context/batch_plan.json` and run exactly one matching review command:
+
+```bash
+# mode: single
+python3 "$SCRIPTS/lqe_suggestion_review.py" publish-review --job "$JOB" --input "$JOB/suggestion_review.draft.json"
+# mode: batched
+python3 "$SCRIPTS/lqe_suggestion_review.py" publish-review --job "$JOB" --input "$JOB/suggestion_review_context"
+
 python3 "$SCRIPTS/lqe_suggestion_review.py" publish-final --job "$JOB"
 python3 "$SCRIPTS/lqe_suggestions.py" validate --job "$JOB"
 ```
@@ -173,12 +191,14 @@ Do not aggregate by default: 不运行聚合脚本. 只有用户明确要求跨�
 }
 </pre>
 
-## References and validation
+## Runtime routing and validation
 
-- Checker contract: `references/check_modules_v2/common.md`, then the selected module. Unsuffixed checker files remain immutable for legacy jobs.
-- Suggestion generation/review: `references/suggestions_v2.md` and `references/suggestion_review_v2.md` for new jobs. The unsuffixed files are immutable legacy runtime references.
-- Project configuration: `projects/<game>/<pair>/profile.json`, `confirmed_rules.md`, style guide, terminology, and target-language notes.
-- Architecture and tests: `docs/ARCHITECTURE.md`, `docs/TESTING.md`.
+- Commands, recovery, TM, terminology, context overrides, profile validation, exports, and tests: [`references/cli.md`](references/cli.md).
+- Checker contract: [`references/check_modules_v2/common.md`](references/check_modules_v2/common.md), then only the selected v2 module. Unsuffixed checker files remain immutable for legacy jobs.
+- Suggestion generation/review: [`references/suggestions_v2.md`](references/suggestions_v2.md) and [`references/suggestion_review_v2.md`](references/suggestion_review_v2.md) for new jobs. The unsuffixed files are immutable legacy runtime references.
+- Feedback analysis and learning: [`references/feedback_learning.md`](references/feedback_learning.md).
+- Project profiles and assets: [`projects/README.md`](projects/README.md), then `projects/<game>/<pair>/profile.json`, `confirmed_rules.md`, style guide, and terminology.
+- Target-language rules: [`target_languages/README.md`](target_languages/README.md), then only the selected language note.
 
 Install: `pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q`.
 
