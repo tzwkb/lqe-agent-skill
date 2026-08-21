@@ -54,6 +54,96 @@
       },
       "distribution": "internal_only",
       "availability": "included"
+    },
+    "entities": {
+      "kind": "entity_registry",
+      "path": "sources/canonical/entities.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "derived_working_copy"
+      },
+      "provenance": {
+        "kind": "derived_working_copy",
+        "source": "sg.md",
+        "raw_xlsx_fidelity_reviewed": false
+      },
+      "distribution": "internal_only",
+      "availability": "included",
+      "media_type": "application/json",
+      "content_schema": "lqe.entities"
+    },
+    "context_rules": {
+      "kind": "context_rules",
+      "path": "sources/canonical/context_rules.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "mixed_derived_and_human_confirmed"
+      },
+      "provenance": {
+        "kind": "canonical_rule_set",
+        "sources": [
+          "sg.md",
+          "sources/confirmed_context_decisions.json"
+        ],
+        "raw_xlsx_fidelity_reviewed": false
+      },
+      "distribution": "internal_only",
+      "availability": "included",
+      "media_type": "application/json",
+      "content_schema": "lqe.context-rules"
+    },
+    "project_sources": {
+      "kind": "project_source_manifest",
+      "path": "sources/canonical/project_sources.json",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "derived_working_copy"
+      },
+      "provenance": {
+        "kind": "derived_working_copy_manifest",
+        "source": "sg.md",
+        "raw_xlsx_fidelity_reviewed": false
+      },
+      "distribution": "internal_only",
+      "availability": "included",
+      "media_type": "application/json",
+      "content_schema": "lqe.project-source-manifest"
+    },
+    "shadow_readme": {
+      "kind": "documentation",
+      "path": "sources/canonical/README.md",
+      "required": true,
+      "authority": {
+        "issuer": "profile_maintainer",
+        "level": "internal_documentation"
+      },
+      "provenance": {
+        "kind": "shadow_package_documentation"
+      },
+      "distribution": "internal_only",
+      "availability": "included",
+      "media_type": "text/markdown"
+    },
+    "review_examples": {
+      "kind": "review_examples",
+      "path": "sources/canonical/review_examples.json",
+      "required": false,
+      "authority": {
+        "issuer": "translator_final_review",
+        "level": "human_reviewed"
+      },
+      "provenance": {
+        "kind": "translator_feedback_regression_gold",
+        "source": "external_feedback_workbook",
+        "runtime_use": false
+      },
+      "distribution": "internal_only",
+      "availability": "included",
+      "media_type": "application/json",
+      "content_schema": "lqe.review-examples"
     }
   },
   "wordcount_basis": "source-chars",
@@ -66,7 +156,7 @@
     "repeat_dedup": true
   },
   "context_pipeline": {
-    "mode": "off"
+    "mode": "enforce"
   },
   "capabilities": {
     "context.core@1": {
@@ -97,7 +187,151 @@
       }
     },
     "source_provenance@1": {
-      "required": true
+      "required": true,
+      "asset": "project_sources"
+    },
+    "context.dialogue@1": {
+      "required": false,
+      "config": {
+        "columns": {
+          "speaker_id": [
+            "speaker_id",
+            "speaker",
+            "Speaker",
+            "说话人",
+            "发言人"
+          ],
+          "addressee_ids": [
+            "addressee_ids",
+            "addressee",
+            "Addressee",
+            "受话人",
+            "对话对象"
+          ],
+          "scene_id": [
+            "scene_id",
+            "Scene ID",
+            "场景ID",
+            "场景编号"
+          ],
+          "relationship_stage": [
+            "relationship_stage",
+            "Relationship Stage",
+            "关系阶段"
+          ],
+          "scene_tone": [
+            "scene_tone",
+            "Scene Tone",
+            "场景语气",
+            "情绪语气"
+          ]
+        }
+      }
+    },
+    "assets.entity_registry@1": {
+      "required": true,
+      "asset": "entities"
+    },
+    "language_policy.register@1": {
+      "required": true,
+      "provider": "ko.register@2",
+      "asset": "context_rules"
+    }
+  },
+  "distribution": "internal_only",
+  "module_context_views": {
+    "accuracy": {
+      "capabilities": [
+        "context.core@1",
+        "context.dialogue@1",
+        "assets.entity_registry@1"
+      ],
+      "dimensions": [
+        "accuracy",
+        "tone"
+      ],
+      "neighbors": {
+        "before": 2,
+        "after": 2,
+        "include_target": false,
+        "boundary_mode": "same_if_present"
+      },
+      "limits": {
+        "max_facts_per_entity": 3,
+        "max_relations": 2,
+        "max_runtime_examples": 0
+      }
+    },
+    "naturalness": {
+      "capabilities": [
+        "context.core@1",
+        "context.dialogue@1",
+        "assets.entity_registry@1",
+        "language_policy.register@1"
+      ],
+      "dimensions": [
+        "naturalness",
+        "tone"
+      ],
+      "constraint_kinds": [
+        "language.register"
+      ],
+      "neighbors": {
+        "before": 2,
+        "after": 2,
+        "include_target": false,
+        "boundary_mode": "same_if_present"
+      },
+      "limits": {
+        "max_facts_per_entity": 3,
+        "max_relations": 2,
+        "max_runtime_examples": 0
+      }
+    },
+    "suggestions": {
+      "capabilities": [
+        "context.core@1",
+        "context.dialogue@1",
+        "assets.entity_registry@1",
+        "language_policy.register@1"
+      ],
+      "dimensions": [
+        "accuracy",
+        "naturalness",
+        "tone"
+      ],
+      "constraint_kinds": [
+        "language.register"
+      ],
+      "neighbors": {
+        "before": 2,
+        "after": 2,
+        "include_target": false,
+        "boundary_mode": "same_if_present"
+      },
+      "limits": {
+        "max_facts_per_entity": 3,
+        "max_relations": 2,
+        "max_runtime_examples": 0
+      }
+    },
+    "grammar": {
+      "capabilities": [
+        "context.core@1",
+        "context.dialogue@1"
+      ],
+      "dimensions": [
+        "grammar"
+      ],
+      "neighbors": {
+        "before": 2,
+        "after": 2,
+        "include_target": false,
+        "boundary_mode": "same_if_present"
+      },
+      "limits": {
+        "max_runtime_examples": 0
+      }
     }
   }
 }

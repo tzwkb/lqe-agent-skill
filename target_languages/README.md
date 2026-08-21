@@ -12,7 +12,7 @@ target_languages/<code>/
 └── eval_notes.md     语言级 AI 评估关注点（可选；read 拷入 job/lang_notes.md，Step 2 注入）
 ```
 
-`<code>` = profile `target_lang`（如 `zh-th` → `th`），或 `read --target-lang` 显式指定。当前可用语言包以本目录实际存在的 `<code>/` 子目录为准。
+`<code>` = profile `target_lang`（如 `zh-th` → `th`），或 `read --target-lang` 显式指定。已建：`en`、`th`、`zh`。
 
 ## attributes.json schema
 
@@ -26,7 +26,7 @@ target_languages/<code>/
 
 ## 为什么按单语言而非语言对建层
 
-属性描述的是**目标语言文本本身**的语言学事实（泰语无句号，与源是什么语言无关），按语言对建层会组合爆炸（N源×M目标）且内容重复。语言对信息在 profile `language_pair` / `source_lang` / `target_lang` 里，运行时解析（源, 目标）各取所需。当前项目已有中文和英语源语；部分内置检查仍保留 CJK/中文源假设，非中文源 profile 必须按适用性显式覆盖，后续再按 `source_lang` 挂源语语言包。目标语言层目录结构不变。
+属性描述的是**目标语言文本本身**的语言学事实（泰语无句号，与源是什么语言无关），按语言对建层会组合爆炸（N源×M目标）且内容重复。语言对信息在 profile `language_pair` / `source_lang` / `target_lang` 里，运行时解析（源, 目标）各取所需。当前运行中的项目源语为中文（zh），源侧假设（CJK 残留检测、中文数字解析、CJK 长度门控）仍在代码中；将来出现非中文源时，按 `source_lang` 挂源语语言包，目标语言层目录结构不变。
 
 ## 新语言接入（agent 自助，无需改代码）
 

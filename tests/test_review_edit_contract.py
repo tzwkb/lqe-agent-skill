@@ -6,7 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from lqe_corrections import CheckFormatError, build_segment_result
+from lqe_chunk import _canonicalize_forced_severities
 from lqe_engine import build_review_policy
+import lqe_io
 
 
 def _issue(evidence):
@@ -39,6 +41,39 @@ class ReviewEditContractTests(unittest.TestCase):
                 [_issue({"type": "grammar_rule", "rule": "ko.standard_spelling"})],
                 review_policy=build_review_policy("full"),
             )
+
+    def test_forced_severity_is_canonicalized_before_result_contract(self):
+        state = {
+            "review_policy": build_review_policy("optimized"),
+            "scoring_policy": {"scorecard_profile": "legacy"},
+        }
+        issue = {
+            "category": "Terminology",
+            "severity": "Minor",
+            "comment": "The confirmed term is not used.",
+            "needs_confirmation": True,
+            "edit": None,
+        }
+
+        canonical = _canonicalize_forced_severities(state, [issue])
+
+        self.assertEqual(canonical[0]["severity"], "Major")
+        self.assertEqual(issue["severity"], "Minor")
+
+    def test_report_validation_never_mutates_result_severity(self):
+        issue = {
+            "category": "Terminology",
+            "severity": "Minor",
+            "comment": "The confirmed term is not used.",
+            "needs_confirmation": True,
+            "edit": None,
+        }
+        results = [{"id": 0, "errors": [issue], "corrected": None}]
+
+        messages = lqe_io._validate_errors(results, {0})
+
+        self.assertTrue(any("non-canonical" in message for message in messages))
+        self.assertEqual(issue["severity"], "Minor")
 
     def test_canonical_rule_evidence_is_accepted(self):
         result = build_segment_result(

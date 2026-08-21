@@ -277,6 +277,19 @@ class DocumentedContractTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.suggestions)
 
+    def test_skill_documents_bounded_suggestion_rebuilds(self):
+        for phrase in (
+            "--authorization-file",
+            "suggestion_context/rebuild_authorization.json",
+            "一个 results basis 默认只允许一轮 generation",
+            "不得为了提高接受数自动回到",
+            "精确出现次数义务",
+            "suggestion_candidate_rules",
+            "绝不修改 `errors.json`",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.skill)
+
     def test_reference_suggestions_do_not_auto_abstain_for_missing_dialogue_fields(self):
         for phrase in (
             '"depends_on_dialogue_context": false',

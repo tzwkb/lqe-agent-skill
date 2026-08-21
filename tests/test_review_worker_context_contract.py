@@ -167,6 +167,14 @@ class ReviewWorkerContextContractTests(unittest.TestCase):
             self.assertTrue(manifest_path.is_file())
             bundle_set = json.loads(bundle_path.read_text(encoding="utf-8"))
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["instructions"]["common"]["locator"]["path"],
+                "references/check_modules_v2/common.md",
+            )
+            self.assertEqual(
+                manifest["instructions"]["module"]["locator"]["path"],
+                "references/check_modules_v2/accuracy.md",
+            )
             packets = [
                 json.loads(
                     (job / "review_packets" / packet_ref["path"]).read_text(

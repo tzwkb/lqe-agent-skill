@@ -73,6 +73,9 @@ MAX_PACKETS_PER_WORKER = 4
 MAX_REVIEW_TEXT_CHARS_PER_WORKER = 25_000
 _DIGEST_PLACEHOLDER = "0" * 64
 SELECTED_EVIDENCE_INDEX_PATH = "selected_evidence_index.json"
+CHECKER_V2_INSTRUCTIONS = (
+    Path(__file__).resolve().parents[1] / "references" / "check_modules_v2"
+)
 
 _BASE_FIELDS = (
     "id",
@@ -890,12 +893,22 @@ def _build_context_batch(
         )
         for packet in packets
     ]
+    instruction_version = state.get("checker_instruction_version", 0)
+    if not isinstance(instruction_version, int) or isinstance(instruction_version, bool):
+        raise ContextBundleError("state.checker_instruction_version must be an integer")
+    use_v2 = instruction_version >= 2
     worker_manifest = build_worker_context_manifest(
         state,
         module,
         bundle_set,
         max_worker_bytes=None,
         packet_payloads=worker_payloads,
+        common_instructions_path=(
+            CHECKER_V2_INSTRUCTIONS / "common.md" if use_v2 else None
+        ),
+        module_instructions_path=(
+            CHECKER_V2_INSTRUCTIONS / f"{module}.md" if use_v2 else None
+        ),
         job_root=job_root,
     )
     bound_packets = [

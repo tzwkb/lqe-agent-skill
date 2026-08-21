@@ -339,6 +339,16 @@ class SuggestionSelectedEvidenceHandoffTests(unittest.TestCase):
                 "reason_codes": [],
                 "evidence": "The candidate matches all source and context evidence.",
                 "semantic_verification": semantic_verification(),
+                "rule_verifications": [
+                    {
+                        "rule_id": assertion["rule_id"],
+                        "status": "pass",
+                        "evidence": "The applicable rule is satisfied.",
+                    }
+                    for assertion in review_packet["entries"][0].get(
+                        "applicable_rule_assertions", []
+                    )
+                ],
             }],
         }
         colliding_review = {

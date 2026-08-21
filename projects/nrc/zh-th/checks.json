@@ -17,5 +17,15 @@
       "severity": "Minor",
       "comment": "TH SG: 省略号用三个英文点 ..."
     }
+  ],
+  "suggestion_candidate_rules": [
+    {
+      "id": "nrc-creature-name-max-12",
+      "type": "max_target_length",
+      "max_characters": 12,
+      "source_regex": "精灵$",
+      "segment_kinds": ["name"],
+      "reason_code": "CREATURE_NAME_LENGTH_EXCEEDED"
+    }
   ]
 }

@@ -2,13 +2,20 @@
   "builtin": {
     "em_dash": false,
     "terminal_punct": false,
-    "ellipsis_mix": false
+    "ellipsis_mix": false,
+    "whitespace": true,
+    "paired_punct": true,
+    "target_form_gate": true,
+    "forbidden_nbsp": true,
+    "ko_single_quote_balance": true,
+    "ko_particle_edit_boundary": true
   },
   "custom": [
     {
       "id": "mhg-ko-ellipsis",
       "pattern": "[…⋯]|\\.{4,}",
       "where": "target",
+      "mutation_gate": true,
       "category": "Punctuation",
       "severity": "Minor",
       "comment": "MHG SG: Korean ellipsis must use exactly three periods (...)"

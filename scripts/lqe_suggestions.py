@@ -7,6 +7,7 @@ import argparse
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -34,7 +35,12 @@ from lqe_engine import (
 from lqe_paths import write_json_atomic
 from lqe_result_contract import result_contract_path, validate_result_contract
 from lqe_split_contract import canonical_digest
-from lqe_target_form import load_target_form_policy
+from lqe_suggestion_control import (
+    consume_mutation_authorization,
+    payload_digest,
+    require_immutable_publication,
+)
+from lqe_target_form import checks_path_for_state, load_target_form_policy
 from lqe_context_bundle import (
     ContextBundleError,
     build_context_bundle,
@@ -90,6 +96,12 @@ SELECTED_EVIDENCE_INDEX_PATH = "review_packets/selected_evidence_index.json"
 SUGGESTION_REVIEW_INSTRUCTIONS_PATH = (
     Path(__file__).resolve().parents[1] / "references" / "suggestion_review.md"
 )
+SUGGESTION_REVIEW_V2_INSTRUCTIONS_PATH = (
+    Path(__file__).resolve().parents[1] / "references" / "suggestion_review_v2.md"
+)
+SUGGESTION_V2_INSTRUCTIONS_PATH = (
+    Path(__file__).resolve().parents[1] / "references" / "suggestions_v2.md"
+)
 _UNBOUND_WORKER_CONTEXT_DIGEST = "0" * 64
 _WORKER_BATCH_SIZE_UNSET = object()
 
@@ -108,6 +120,7 @@ HARD_REJECT = "hard_reject"
 DETERMINISTIC_ACCEPT = "deterministic_accept"
 INDEPENDENT_VERIFIER = "independent_verifier"
 RISK_ROUTES = {HARD_REJECT, DETERMINISTIC_ACCEPT, INDEPENDENT_VERIFIER}
+REBUILD_AUDIT_NAME = "rebuild_authorization.json"
 SEMANTIC_CHECK_FIELDS = (
     "subjects",
     "actions",
@@ -951,14 +964,20 @@ def build_suggestion_content_index(
     return payload
 
 
-def _suggestion_verifier_instruction_input() -> tuple[dict, bytes]:
-    path = SUGGESTION_REVIEW_INSTRUCTIONS_PATH
+def _suggestion_verifier_instruction_input(
+    guard_version: int = 0,
+) -> tuple[dict, bytes]:
+    path = (
+        SUGGESTION_REVIEW_V2_INSTRUCTIONS_PATH
+        if guard_version >= 2
+        else SUGGESTION_REVIEW_INSTRUCTIONS_PATH
+    )
     if not path.is_file():
         raise ValueError(f"suggestion verifier instructions are missing: {path}")
     payload = path.read_bytes()
     return (
         {
-            "path": "references/suggestion_review.md",
+            "path": f"references/{path.name}",
             "sha256": hashlib.sha256(payload).hexdigest(),
             "bytes": len(payload),
         },
@@ -1075,6 +1094,9 @@ def build_suggestion_review_packet(
     candidate_routes = {
         entry["id"]: entry for entry in candidate_artifact["routes"]
     }
+    guard_version = generation_packet.get("instructions", {}).get(
+        "candidate_guard_version", 0
+    )
     reviewed_ids = [
         route["id"]
         for route in candidate_artifact["routes"]
@@ -1105,8 +1127,21 @@ def build_suggestion_review_packet(
                     "candidate_constraint_evaluations", []
                 )
             ),
+            **(
+                {
+                    "applicable_rule_assertions": copy.deepcopy(
+                        candidate_routes[segment_id].get(
+                            "applicable_rule_assertions", []
+                        )
+                    )
+                }
+                if guard_version >= 2
+                else {}
+            ),
         })
-    verifier_instructions, _ = _suggestion_verifier_instruction_input()
+    verifier_instructions, _ = _suggestion_verifier_instruction_input(
+        guard_version
+    )
     payload = {
         "schema": REVIEW_PACKET_SCHEMA,
         "version": REVIEW_PACKET_VERSION,
@@ -1157,6 +1192,14 @@ def build_suggestion_review_packet(
             "verify_source_meaning": True,
             "verify_all_known_issues": True,
             "verify_confirmed_constraints": True,
+            **(
+                {
+                    "candidate_guard_version": guard_version,
+                    "rule_attestation_required": True,
+                }
+                if guard_version >= 2
+                else {}
+            ),
             "verifier_instructions": verifier_instructions,
             "worker_context": {
                 "input_measurement_path": (
@@ -1166,14 +1209,14 @@ def build_suggestion_review_packet(
                     "manifest_path",
                     "suggestion_context/worker_manifest.json",
                 ),
-                "manifest_digest": candidate_artifact[
+                "manifest_digest": generation_packet[
                     "worker_context_manifest_digest"
                 ],
                 "bundle_set_path": generation_worker_context.get(
                     "bundle_set_path",
                     "suggestion_context/bundle_set.json",
                 ),
-                "bundle_set_digest": candidate_artifact[
+                "bundle_set_digest": generation_packet[
                     "context_bundle_set_digest"
                 ],
                 "same_evidence_as_generation": True,
@@ -1258,6 +1301,213 @@ def _results_basis(results: list[dict]) -> list[dict]:
         for issue in entry.get("errors", []):
             issue.pop("repeated", None)
     return basis
+
+
+def _load_suggestion_candidate_rules(state: dict | None) -> list[dict]:
+    checks_path = checks_path_for_state(state or {})
+    if not checks_path:
+        return []
+    path = Path(checks_path)
+    if not path.is_file():
+        raise ValueError(f"configured checks file is missing: {path}")
+    payload = read_json(path)
+    rules = payload.get("suggestion_candidate_rules", [])
+    if not isinstance(rules, list):
+        raise ValueError("suggestion_candidate_rules must be an array")
+    output = []
+    seen = set()
+    allowed = {
+        "id",
+        "type",
+        "max_characters",
+        "pattern",
+        "target",
+        "required_occurrences",
+        "instruction",
+        "source_regex",
+        "segment_kinds",
+        "reason_code",
+    }
+    for index, rule in enumerate(rules):
+        label = f"suggestion_candidate_rules[{index}]"
+        if not isinstance(rule, dict) or set(rule) - allowed:
+            raise ValueError(f"{label} has invalid fields")
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not rule_id.strip() or rule_id in seen:
+            raise ValueError(f"{label}.id is invalid or duplicated")
+        seen.add(rule_id)
+        rule_type = rule.get("type")
+        if rule_type not in {
+            "max_target_length",
+            "required_target_regex",
+            "forbidden_target_regex",
+            "target_literal_count",
+            "reviewer_assertion",
+        }:
+            raise ValueError(f"{label}.type is unsupported")
+        common_fields = {
+            "id", "type", "source_regex", "segment_kinds", "reason_code"
+        }
+        type_fields = {
+            "max_target_length": {"max_characters"},
+            "required_target_regex": {"pattern"},
+            "forbidden_target_regex": {"pattern"},
+            "target_literal_count": {"target", "required_occurrences"},
+            "reviewer_assertion": {"instruction"},
+        }[rule_type]
+        if set(rule) - common_fields - type_fields:
+            raise ValueError(f"{label} has fields from another rule type")
+        if not type_fields.issubset(rule):
+            raise ValueError(f"{label} is missing required type fields")
+        if rule_type == "max_target_length":
+            maximum = rule.get("max_characters")
+            if type(maximum) is not int or maximum < 1:
+                raise ValueError(
+                    f"{label}.max_characters must be a positive integer"
+                )
+        elif rule_type in {"required_target_regex", "forbidden_target_regex"}:
+            pattern = rule.get("pattern")
+            if not isinstance(pattern, str) or not pattern:
+                raise ValueError(f"{label}.pattern must be non-empty")
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"{label}.pattern is invalid: {exc}") from exc
+        elif rule_type == "target_literal_count":
+            target = rule.get("target")
+            count = rule.get("required_occurrences")
+            if not isinstance(target, str) or not target:
+                raise ValueError(f"{label}.target must be non-empty")
+            if type(count) is not int or count < 0:
+                raise ValueError(
+                    f"{label}.required_occurrences must be a non-negative integer"
+                )
+        else:
+            instruction = rule.get("instruction")
+            if not isinstance(instruction, str) or not instruction.strip():
+                raise ValueError(f"{label}.instruction must be non-empty")
+        source_regex = rule.get("source_regex")
+        segment_kinds = rule.get("segment_kinds")
+        if source_regex is None and segment_kinds is None:
+            raise ValueError(f"{label} must declare a source or segment-kind selector")
+        if source_regex is not None:
+            if not isinstance(source_regex, str) or not source_regex:
+                raise ValueError(f"{label}.source_regex must be non-empty")
+            try:
+                re.compile(source_regex)
+            except re.error as exc:
+                raise ValueError(f"{label}.source_regex is invalid: {exc}") from exc
+        if segment_kinds is not None and (
+            not isinstance(segment_kinds, list)
+            or not segment_kinds
+            or any(kind not in {"name", "desc"} for kind in segment_kinds)
+            or len(segment_kinds) != len(set(segment_kinds))
+        ):
+            raise ValueError(f"{label}.segment_kinds is invalid")
+        reason_code = rule.get("reason_code")
+        if not isinstance(reason_code, str) or not reason_code.strip():
+            raise ValueError(f"{label}.reason_code must be non-empty")
+        output.append(copy.deepcopy(rule))
+    return output
+
+
+def _suggestion_guard_version(state: dict | None) -> int:
+    value = (state or {}).get("suggestion_guard_version", 0)
+    if type(value) is not int or value not in {0, 1, 2}:
+        raise ValueError("suggestion_guard_version is unsupported")
+    return value
+
+
+def _applicable_candidate_rules(segment: dict, rules: list[dict]) -> list[dict]:
+    output = []
+    for rule in rules:
+        source_regex = rule.get("source_regex")
+        if source_regex is not None and re.search(
+            source_regex, segment.get("source", "")
+        ) is None:
+            continue
+        segment_kinds = rule.get("segment_kinds")
+        if segment_kinds is not None and segment.get("kind") not in segment_kinds:
+            continue
+        output.append(copy.deepcopy(rule))
+    return output
+
+
+def _evaluate_structured_candidate_rule(rule: dict, reference_target: str) -> dict:
+    rule_type = rule["type"]
+    if rule_type == "max_target_length":
+        actual = len(reference_target)
+        expected = rule["max_characters"]
+        matched = actual <= expected
+        observation = {"max_characters": expected, "actual_characters": actual}
+    elif rule_type in {"required_target_regex", "forbidden_target_regex"}:
+        found = re.search(rule["pattern"], reference_target) is not None
+        matched = found if rule_type == "required_target_regex" else not found
+        observation = {"pattern": rule["pattern"], "matched": found}
+    elif rule_type == "target_literal_count":
+        actual = reference_target.count(rule["target"])
+        expected = rule["required_occurrences"]
+        matched = actual == expected
+        observation = {
+            "target": rule["target"],
+            "required_occurrences": expected,
+            "actual_occurrences": actual,
+        }
+    else:
+        raise ValueError("reviewer assertion has no deterministic evaluator")
+    return {
+        "kind": f"project.{rule_type}",
+        "status": "match" if matched else "mismatch",
+        "reason_codes": [] if matched else [rule["reason_code"]],
+        "observation": {"rule_id": rule["id"], **observation},
+    }
+
+
+def _non_overlapping_occurrence_counts(text: str, values: list[str]) -> dict[str, int]:
+    occurrences = []
+    for value in set(values):
+        start = text.find(value)
+        while start >= 0:
+            occurrences.append((start, start + len(value), value))
+            start = text.find(value, start + 1)
+    occurrences.sort(key=lambda item: (-(item[1] - item[0]), item[0], item[2]))
+    accepted = []
+    counts = {value: 0 for value in set(values)}
+    for start, end, value in occurrences:
+        if any(left <= start and end <= right for left, right in accepted):
+            continue
+        accepted.append((start, end))
+        counts[value] += 1
+    return counts
+
+
+def _confirmed_term_obligations(segment: dict) -> list[dict]:
+    targets_by_source = {}
+    for hit in segment.get("term_hits", []):
+        if not isinstance(hit, dict) or hit.get("confirmed") is not True:
+            continue
+        source = hit.get("source")
+        target = hit.get("target")
+        if not isinstance(source, str) or not source or not isinstance(target, str) or not target:
+            continue
+        targets_by_source.setdefault(source, set()).add(target)
+    unique_targets = {
+        source: next(iter(targets))
+        for source, targets in targets_by_source.items()
+        if len(targets) == 1
+    }
+    source_counts = _non_overlapping_occurrence_counts(
+        segment.get("source", ""), list(unique_targets)
+    )
+    return [
+        {
+            "source": source,
+            "target": unique_targets[source],
+            "required_occurrences": source_counts[source],
+        }
+        for source in sorted(unique_targets)
+        if source_counts[source] > 0
+    ]
 
 
 def _issue_projection(issue: dict, index: int = 0) -> dict:
@@ -1837,6 +2087,11 @@ def build_suggestion_packet(
             "do_not_apply_to_corrected_export": True,
             "unresolved_terminology_segments_hard_rejected": True,
             "generation_mode": "source_first_full_rewrite",
+            **(
+                {"candidate_guard_version": _suggestion_guard_version(state)}
+                if _suggestion_guard_version(state) >= 2
+                else {}
+            ),
             "source_first_contract": {
                 "derive_semantic_propositions_from": "source",
                 "do_not_use_current_target_as_semantic_skeleton": True,
@@ -2075,6 +2330,11 @@ def _build_live_packet_context(
             bundle_set,
             max_worker_bytes=None,
             packet_payloads=[_worker_packet_basis(packet_basis)],
+            suggestion_instructions_path=(
+                SUGGESTION_V2_INSTRUCTIONS_PATH
+                if _suggestion_guard_version(state) >= 2
+                else None
+            ),
             job_root=job,
         )
     except (ContextBundleError, OSError, ValueError) as exc:
@@ -2773,6 +3033,8 @@ def _candidate_constraint_evaluations(
     packet_segment: dict,
     segment: dict,
     reference_target: str,
+    candidate_rules: list[dict] | None = None,
+    candidate_guard_version: int = 0,
 ) -> tuple[list[dict], str | None]:
     packet_constraints = (
         packet_segment.get("generation_constraints", {}).get(
@@ -2857,6 +3119,76 @@ def _candidate_constraint_evaluations(
         evaluations.append(item)
         if route_effect is None:
             route_effect = INDEPENDENT_VERIFIER
+
+    obligations = (
+        _confirmed_term_obligations(segment)
+        if candidate_guard_version >= 1
+        else []
+    )
+    target_counts = _non_overlapping_occurrence_counts(
+        reference_target,
+        [
+            obligation.get("target", "")
+            for obligation in obligations
+            if isinstance(obligation, dict)
+            and isinstance(obligation.get("target"), str)
+            and obligation.get("target")
+        ],
+    )
+    for index, obligation in enumerate(obligations):
+        if (
+            not isinstance(obligation, dict)
+            or set(obligation) != {"source", "target", "required_occurrences"}
+            or not isinstance(obligation["source"], str)
+            or not obligation["source"]
+            or not isinstance(obligation["target"], str)
+            or not obligation["target"]
+            or type(obligation["required_occurrences"]) is not int
+            or obligation["required_occurrences"] < 1
+        ):
+            raise ValueError(
+                f"suggestion candidate id {segment['id']} term obligation {index} is invalid"
+            )
+        actual = target_counts.get(obligation["target"], 0)
+        status = (
+            "match"
+            if actual == obligation["required_occurrences"]
+            else "mismatch"
+        )
+        if status == "match":
+            continue
+        item = {
+            "constraint_index": len(evaluations),
+            "kind": "terminology.confirmed_exact_occurrence",
+            "status": status,
+            "reason_codes": ["confirmed_term_occurrence_mismatch"],
+            "observation": {
+                **copy.deepcopy(obligation),
+                "actual_occurrences": actual,
+            },
+        }
+        item["evaluation_digest"] = canonical_digest(item)
+        evaluations.append(item)
+        route_effect = HARD_REJECT
+
+    applicable_rules = (
+        _applicable_candidate_rules(segment, candidate_rules or [])
+        if candidate_guard_version >= 1
+        else []
+    )
+    for rule in applicable_rules:
+        if rule["type"] == "reviewer_assertion":
+            continue
+        evaluated = _evaluate_structured_candidate_rule(rule, reference_target)
+        if evaluated["status"] == "match":
+            continue
+        item = {
+            "constraint_index": len(evaluations),
+            **evaluated,
+        }
+        item["evaluation_digest"] = canonical_digest(item)
+        evaluations.append(item)
+        route_effect = HARD_REJECT
     return evaluations, route_effect
 
 
@@ -2867,6 +3199,8 @@ def _candidate_route(
     source_semantics: dict,
     tone_decision: dict,
     target_form_policy: dict | None = None,
+    candidate_rules: list[dict] | None = None,
+    candidate_guard_version: int = 0,
 ) -> tuple[dict, dict | None]:
     try:
         validated = validate_reference_target(
@@ -2891,9 +3225,57 @@ def _candidate_route(
         packet_segment,
         segment,
         validated,
+        candidate_rules,
+        candidate_guard_version,
     )
     route = INDEPENDENT_VERIFIER
     reason_codes = []
+    applicable_rule_assertions = (
+        [
+            {
+                "rule_id": rule["id"],
+                "instruction": rule["instruction"],
+                "reason_code": rule["reason_code"],
+            }
+            for rule in _applicable_candidate_rules(segment, candidate_rules or [])
+            if rule["type"] == "reviewer_assertion"
+        ]
+        + [
+            {
+                "rule_id": (
+                    "confirmed-term-sense-"
+                    + canonical_digest({
+                        "source": obligation["source"],
+                        "target": obligation["target"],
+                    })[:16]
+                ),
+                "instruction": (
+                    f"Verify confirmed target {obligation['target']!r} is "
+                    f"semantically authorized for source {obligation['source']!r} "
+                    "in this occurrence; exact string presence alone is insufficient."
+                ),
+                "reason_code": "CONFIRMED_TERM_SENSE_CONFLICT",
+            }
+            for obligation in _confirmed_term_obligations(segment)
+        ]
+        + [
+            {
+                "rule_id": f"known-issue-{issue['issue_id']}",
+                "instruction": (
+                    f"Verify known issue {issue['issue_id']} "
+                    f"({issue.get('category', 'unknown')}) is fully resolved; "
+                    "candidate fluency is not sufficient."
+                ),
+                "reason_code": "KNOWN_ISSUE_UNRESOLVED",
+            }
+            for issue in packet_segment.get("known_issues", [])
+            if isinstance(issue, dict)
+            and isinstance(issue.get("issue_id"), str)
+            and issue["issue_id"]
+        ]
+        if candidate_guard_version >= 2
+        else []
+    )
     if candidate["source_semantics"]["omitted_source_elements"]:
         route = HARD_REJECT
         reason_codes.append("GENERATION_REPORTS_OMISSION")
@@ -2918,7 +3300,23 @@ def _candidate_route(
         if "conflict" in statuses:
             reason_codes.append("CONFIRMED_CONSTRAINT_CONFLICT")
         if "mismatch" in statuses:
-            reason_codes.append("CONFIRMED_CONSTRAINT_MISMATCH")
+            kinds = {
+                evaluation.get("kind")
+                for evaluation in constraint_evaluations
+                if evaluation.get("status") == "mismatch"
+            }
+            if "terminology.confirmed_exact_occurrence" in kinds:
+                reason_codes.append("CONFIRMED_TERM_OCCURRENCE_MISMATCH")
+            if any(
+                isinstance(kind, str) and kind.startswith("project.")
+                for kind in kinds
+            ):
+                reason_codes.append("STRUCTURED_CANDIDATE_RULE_MISMATCH")
+            if any(
+                isinstance(kind, str) and kind.startswith("language.")
+                for kind in kinds
+            ):
+                reason_codes.append("CONFIRMED_CONSTRAINT_MISMATCH")
     elif constraint_route == INDEPENDENT_VERIFIER and route != HARD_REJECT:
         route = INDEPENDENT_VERIFIER
         reason_codes.append("CONSTRAINT_REQUIRES_INDEPENDENT_REVIEW")
@@ -2928,6 +3326,11 @@ def _candidate_route(
         "reason_codes": reason_codes,
         "candidate_digest": candidate["candidate_digest"],
         "candidate_constraint_evaluations": constraint_evaluations,
+        **(
+            {"applicable_rule_assertions": applicable_rule_assertions}
+            if candidate_guard_version >= 2
+            else {}
+        ),
     }, candidate)
 
 
@@ -2942,6 +3345,8 @@ def _build_candidate_artifact_payload(
     *,
     generation_batches: list[dict] | None = None,
     target_form_policy: dict | None = None,
+    candidate_rules: list[dict] | None = None,
+    candidate_guard_version: int = 0,
 ) -> dict:
     segment_map = {segment["id"]: segment for segment in segments}
     packet_segments = {segment["id"]: segment for segment in packet["segments"]}
@@ -2968,6 +3373,8 @@ def _build_candidate_artifact_payload(
             draft_entry["source_semantics"],
             draft_entry["tone_decision"],
             target_form_policy,
+            candidate_rules,
+            candidate_guard_version,
         )
         routes.append(route)
         if candidate is not None:
@@ -3032,6 +3439,8 @@ def _build_candidate_artifact_payload(
         packet,
         segments,
         target_form_policy=target_form_policy,
+        candidate_rules=candidate_rules,
+        candidate_guard_version=candidate_guard_version,
     )
     return payload
 
@@ -3042,6 +3451,8 @@ def build_candidate_artifact(
     segments: list[dict],
     *,
     target_form_policy: dict | None = None,
+    candidate_rules: list[dict] | None = None,
+    candidate_guard_version: int = 0,
 ) -> dict:
     validate_generation_draft(draft, packet)
     return _build_candidate_artifact_payload(
@@ -3053,6 +3464,8 @@ def build_candidate_artifact(
         canonical_digest(draft),
         segments,
         target_form_policy=target_form_policy,
+        candidate_rules=candidate_rules,
+        candidate_guard_version=candidate_guard_version,
     )
 
 
@@ -3063,6 +3476,8 @@ def build_candidate_artifact_from_batches(
     segments: list[dict],
     *,
     target_form_policy: dict | None = None,
+    candidate_rules: list[dict] | None = None,
+    candidate_guard_version: int = 0,
 ) -> dict:
     if len(batches) != len(drafts) or len(batches) < 2:
         raise ValueError("suggestion generation batch draft count is invalid")
@@ -3126,6 +3541,8 @@ def build_candidate_artifact_from_batches(
         segments,
         generation_batches=batch_evidence,
         target_form_policy=target_form_policy,
+        candidate_rules=candidate_rules,
+        candidate_guard_version=candidate_guard_version,
     )
 
 
@@ -3135,6 +3552,8 @@ def validate_candidate_artifact(
     segments: list[dict],
     *,
     target_form_policy: dict | None = None,
+    candidate_rules: list[dict] | None = None,
+    candidate_guard_version: int = 0,
 ) -> dict:
     _validate_schema(artifact, CANDIDATE_SCHEMA, CANDIDATE_VERSION)
     _validate_self_digest(artifact, "artifact_digest", "candidate artifact")
@@ -3286,6 +3705,8 @@ def validate_candidate_artifact(
             entry["source_semantics"],
             entry["tone_decision"],
             target_form_policy,
+            candidate_rules,
+            candidate_guard_version,
         )
         if expected_candidate != entry:
             raise ValueError(
@@ -3606,6 +4027,8 @@ def load_reference_suggestions(
         packet,
         segments,
         target_form_policy=target_form_policy,
+        candidate_rules=_load_suggestion_candidate_rules(state),
+        candidate_guard_version=_suggestion_guard_version(state),
     )
     review = None
     review_packet = None
@@ -3629,6 +4052,65 @@ def load_reference_suggestions(
         review_packet=review_packet,
         target_form_policy=target_form_policy,
     )
+
+
+def _suggestion_worker_work_exists(job: Path) -> bool:
+    fixed = (
+        CANDIDATE_NAME,
+        "suggestion_review.packet.json",
+        "suggestion_review.json",
+        ARTIFACT_NAME,
+    )
+    if any((job / name).is_file() for name in fixed):
+        return True
+    return any(
+        any((job / directory).glob(pattern))
+        for directory, pattern in (
+            (SUGGESTION_CONTEXT_DIR, "**/generation.draft.json"),
+            ("suggestion_review_context", "**/review.draft.json"),
+        )
+    )
+
+
+def _require_rebuild_authorization(
+    job: Path,
+    packet: dict,
+    authorization_path: object,
+) -> dict | None:
+    prepared_path = job / PACKET_NAME
+    if not prepared_path.is_file():
+        return None
+    prepared = read_json(prepared_path)
+    if prepared == packet or not _suggestion_worker_work_exists(job):
+        return None
+    if authorization_path is None:
+        old_basis = prepared.get("results_basis_digest")
+        new_basis = packet.get("results_basis_digest")
+        raise ValueError(
+            "suggestion rebuild would invalidate existing generation/review work "
+            f"(results basis {old_basis} -> {new_basis}); stop and obtain explicit "
+            "user authorization, then pass --authorization-file"
+        )
+    consumption = consume_mutation_authorization(
+        job,
+        authorization_path,
+        action="rebuild_suggestion_chain",
+        job_id=packet["job_id"],
+        previous_digest=payload_digest(prepared),
+        current_digest=payload_digest(packet),
+        results_basis_digest=packet["results_basis_digest"],
+    )
+    return {
+        "schema": "lqe.suggestion-rebuild-authorization",
+        "version": 1,
+        "authorization_consumption": consumption,
+        "previous_packet_digest": prepared.get("packet_digest"),
+        "current_packet_digest": packet.get("packet_digest"),
+        "previous_results_basis_digest": prepared.get("results_basis_digest"),
+        "current_results_basis_digest": packet.get("results_basis_digest"),
+        "previous_reviewed_ids": copy.deepcopy(prepared.get("reviewed_ids", [])),
+        "current_reviewed_ids": copy.deepcopy(packet.get("reviewed_ids", [])),
+    }
 
 
 def cmd_prepare(args) -> None:
@@ -3663,7 +4145,15 @@ def cmd_prepare(args) -> None:
         worker_batch_size=args.worker_batch_size,
     )
     packet = packet_plan["root_packet"]
+    rebuild_audit = _require_rebuild_authorization(
+        job, packet, getattr(args, "authorization_file", None)
+    )
     output = Path(args.out) if args.out else job / PACKET_NAME
+    if rebuild_audit is not None:
+        write_json_atomic(
+            job / SUGGESTION_CONTEXT_DIR / REBUILD_AUDIT_NAME,
+            rebuild_audit,
+        )
     _write_packet_plan(job, state, packet_plan)
     write_json_atomic(output, packet)
     measurement = _suggestion_input_measurement(packet_plan)
@@ -3716,6 +4206,8 @@ def cmd_publish_candidates(args) -> None:
             draft,
             segments,
             target_form_policy=load_target_form_policy(state),
+            candidate_rules=_load_suggestion_candidate_rules(state),
+            candidate_guard_version=_suggestion_guard_version(state),
         )
     else:
         if not input_path.is_dir():
@@ -3736,8 +4228,21 @@ def cmd_publish_candidates(args) -> None:
             drafts,
             segments,
             target_form_policy=load_target_form_policy(state),
+            candidate_rules=_load_suggestion_candidate_rules(state),
+            candidate_guard_version=_suggestion_guard_version(state),
         )
     output = Path(args.out) if args.out else job / CANDIDATE_NAME
+    if require_immutable_publication(
+        job,
+        output,
+        artifact,
+        getattr(args, "authorization_file", None),
+        action="revise_suggestion_candidates",
+        job_id=artifact["job_id"],
+        results_basis_digest=artifact["results_basis_digest"],
+    ):
+        print(f"[lqe_suggestions] Candidates unchanged → {output}")
+        return
     write_json_atomic(output, artifact)
     route_counts = {
         route: sum(item["risk_route"] == route for item in artifact["routes"])
@@ -3769,6 +4274,8 @@ def cmd_validate(args) -> None:
         packet,
         segments,
         target_form_policy=target_form_policy,
+        candidate_rules=_load_suggestion_candidate_rules(state),
+        candidate_guard_version=_suggestion_guard_version(state),
     )
     review_path = job / "suggestion_review.json"
     review = read_json(review_path) if review_path.is_file() else None
@@ -3817,10 +4324,18 @@ def build_parser() -> argparse.ArgumentParser:
                     "omit for one advisory-measured batch"
                 ),
             )
+            command.add_argument(
+                "--authorization-file",
+                help="one-time user authorization bound to the old and new packet",
+            )
             command.set_defaults(func=cmd_prepare)
         elif name == "publish-candidates":
             command.add_argument("--input", required=True)
             command.add_argument("--out")
+            command.add_argument(
+                "--authorization-file",
+                help="one-time user authorization required to revise an artifact",
+            )
             command.set_defaults(func=cmd_publish_candidates)
         elif name == "publish":
             command.add_argument("--input")

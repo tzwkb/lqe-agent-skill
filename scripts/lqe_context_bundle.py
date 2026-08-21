@@ -2882,6 +2882,8 @@ def _instruction_paths(
     suggestions_path: object | None,
 ) -> dict[str, object]:
     common = common_path or ROOT / "references" / "check_modules" / "common.md"
+    if module == "suggestions" and suggestions_path is not None:
+        module_path = suggestions_path
     if module_path is None:
         candidate = ROOT / "references" / "check_modules" / f"{module}.md"
         module_path = candidate if candidate.is_file() else ROOT / "references" / "suggestions.md"

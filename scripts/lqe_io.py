@@ -1824,6 +1824,8 @@ def _prepare_read_assets(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "context_contract_version": 1,
         "input_guard_version": 1,
+        "checker_instruction_version": 2,
+        "suggestion_guard_version": 2,
         "aipe_url": None,
         "check_scope": check_scope,
         "review_policy": review_policy,
@@ -4197,8 +4199,10 @@ def _validate_errors(errors_data: list, seg_ids: set, scorecard_profile: dict | 
                 issues.append(f"[seg {sid}] 非法 severity: '{sev}'")
             new_sev = apply_severity(cat, sev, scorecard_profile)
             if new_sev != sev:
-                issues.append(f"[seg {sid}] {cat} severity {sev}→{new_sev} (auto-corrected)")
-                e["severity"] = new_sev
+                issues.append(
+                    f"[seg {sid}] {cat} severity {sev}→{new_sev} "
+                    "(non-canonical; rebuild the upstream result)"
+                )
     return issues
 
 

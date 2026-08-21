@@ -142,6 +142,7 @@ class ReviewModeSwitchTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["review_policy"]["mode"], "full")
+            self.assertEqual(state["suggestion_guard_version"], 2)
 
     def test_skill_requires_agent_to_ask_before_new_job(self):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

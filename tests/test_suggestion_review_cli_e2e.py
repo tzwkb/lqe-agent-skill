@@ -695,6 +695,15 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
             packet = json.loads(
                 (self.job / record["packet_path"]).read_text(encoding="utf-8")
             )
+            worker_context = packet["instructions"]["worker_context"]
+            self.assertEqual(
+                worker_context["manifest_digest"],
+                packet["worker_context_manifest_digest"],
+            )
+            self.assertEqual(
+                worker_context["bundle_set_digest"],
+                packet["context_bundle_set_digest"],
+            )
             draft = {
                 "schema": "lqe.suggestion-review-draft",
                 "version": 1,

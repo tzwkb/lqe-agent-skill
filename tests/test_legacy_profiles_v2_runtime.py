@@ -14,6 +14,7 @@ from lqe_capabilities import (
     validate_capability_resolution,
 )
 from lqe_context import descriptor_registry
+from lqe_language_policies import trusted_provider_registry
 from lqe_project_assets import (
     LEGACY_ASSET_FIELDS,
     asset_statuses,
@@ -25,7 +26,24 @@ from lqe_project_assets import (
 PROFILE_EXPECTATIONS = {
     "mhg/zh-ko": {
         "wordcount_basis": "source-chars",
-        "assets": {"style_guide", "checks", "confirmed_rules"},
+        "mode": "enforce",
+        "assets": {
+            "style_guide",
+            "checks",
+            "confirmed_rules",
+            "entities",
+            "context_rules",
+            "project_sources",
+            "shadow_readme",
+            "review_examples",
+        },
+        "capabilities": {
+            "context.core@1",
+            "context.dialogue@1",
+            "assets.entity_registry@1",
+            "language_policy.register@1",
+            "source_provenance@1",
+        },
     },
     "nrc/zh-en": {
         "wordcount_basis": "target-words",
@@ -43,16 +61,6 @@ PROFILE_EXPECTATIONS = {
         "wordcount_basis": "target-words",
         "assets": {"style_guide", "terminology", "checks", "confirmed_rules"},
     },
-}
-PUBLIC_PROFILE_EXPECTATIONS = {
-    "pop-epoch/en-tr": {
-        "wordcount_basis": "target-words",
-        "assets": {"style_guide", "checks", "confirmed_rules"},
-    },
-}
-ALL_PROFILE_EXPECTATIONS = {
-    **PROFILE_EXPECTATIONS,
-    **PUBLIC_PROFILE_EXPECTATIONS,
 }
 FOUNDATIONS = {"context.core@1", "source_provenance@1"}
 
@@ -77,6 +85,7 @@ def runtime(profile_name: str) -> tuple[dict, dict, dict]:
     resolution = resolve_capabilities(
         normalized,
         asset_statuses=asset_statuses(inspection["snapshot"]),
+        provider_registry=trusted_provider_registry(),
     )
     return normalized, inspection, resolution
 
@@ -88,7 +97,7 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
             for path in (ROOT / "projects").glob("*/*/profile.json")
         }
 
-        self.assertTrue(set(ALL_PROFILE_EXPECTATIONS) <= actual)
+        self.assertTrue(set(PROFILE_EXPECTATIONS) <= actual)
 
     def test_v2_core_is_explicit_and_legacy_top_level_paths_are_preserved(self):
         for profile_name, expected in PROFILE_EXPECTATIONS.items():
@@ -99,10 +108,16 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                 self.assertEqual(raw["profile_contract_version"], 2)
                 self.assertEqual(normalized["profile_contract_version"], 2)
                 self.assertFalse(normalized["legacy_adapter"])
-                self.assertEqual(raw["context_pipeline"], {"mode": "off"})
+                self.assertEqual(
+                    raw["context_pipeline"],
+                    {"mode": expected.get("mode", "off")},
+                )
                 self.assertEqual(raw["wordcount_basis"], expected["wordcount_basis"])
                 self.assertEqual(set(raw["assets"]), expected["assets"])
-                self.assertEqual(set(raw["capabilities"]), FOUNDATIONS)
+                self.assertEqual(
+                    set(raw["capabilities"]),
+                    expected.get("capabilities", FOUNDATIONS),
+                )
                 self.assertEqual(
                     raw["capabilities"]["context.core@1"]["config"]["identity"]["fallback"],
                     "source_coordinate",
@@ -133,7 +148,7 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                     )
 
     def test_declared_asset_paths_match_included_and_external_reality(self):
-        for profile_name in ALL_PROFILE_EXPECTATIONS:
+        for profile_name in PROFILE_EXPECTATIONS:
             with self.subTest(profile=profile_name):
                 path, raw = load_profile(profile_name)
                 normalized, inspection, _ = runtime(profile_name)
@@ -162,23 +177,6 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
         source = (ROOT / "scripts" / "run_tests.py").read_text(encoding="utf-8")
 
         self.assertIn('declaration.get("availability") == "external"', source)
-
-    def test_public_profiles_are_distributable_and_contract_valid(self):
-        for profile_name, expected in PUBLIC_PROFILE_EXPECTATIONS.items():
-            with self.subTest(profile=profile_name):
-                _, raw = load_profile(profile_name)
-                normalized = normalize_profile(raw)
-
-                self.assertEqual(raw["profile_contract_version"], 2)
-                self.assertEqual(raw["context_pipeline"], {"mode": "off"})
-                self.assertEqual(raw["wordcount_basis"], expected["wordcount_basis"])
-                self.assertEqual(set(raw["assets"]), expected["assets"])
-                self.assertEqual(set(raw["capabilities"]), FOUNDATIONS)
-                self.assertEqual(normalized["source_lang"], "en")
-                self.assertEqual(normalized["target_lang"], "tr")
-                for declaration in raw["assets"].values():
-                    self.assertEqual(declaration["distribution"], "public_allowed")
-                    self.assertEqual(declaration["availability"], "included")
 
     def test_distribution_and_authority_exceptions_are_explicit(self):
         _, mhg = load_profile("mhg/zh-ko")
@@ -224,13 +222,16 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
 
     def test_off_mode_resolves_only_foundations_and_is_deterministic(self):
         builtins = set(builtin_descriptor_registry())
-        for profile_name in ALL_PROFILE_EXPECTATIONS:
+        for profile_name, expected in PROFILE_EXPECTATIONS.items():
+            if expected.get("mode", "off") != "off":
+                continue
             with self.subTest(profile=profile_name):
                 normalized, inspection, resolution = runtime(profile_name)
                 statuses = asset_statuses(inspection["snapshot"])
                 repeated = resolve_capabilities(
                     normalized,
                     asset_statuses=statuses,
+                    provider_registry=trusted_provider_registry(),
                 )
                 descriptors = descriptor_registry(
                     normalized,
@@ -257,6 +258,41 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                         resolution["disabled"][capability_id]["reason"],
                         "not_declared",
                     )
+
+    def test_mhg_enforce_mode_binds_v2_register_and_context_assets(self):
+        normalized, inspection, resolution = runtime("mhg/zh-ko")
+        repeated = resolve_capabilities(
+            normalized,
+            asset_statuses=asset_statuses(inspection["snapshot"]),
+            provider_registry=trusted_provider_registry(),
+        )
+
+        validate_capability_resolution(resolution)
+        self.assertEqual(resolution, repeated)
+        self.assertEqual(resolution["context_pipeline_mode"], "enforce")
+        self.assertEqual(
+            set(resolution["enabled"]),
+            PROFILE_EXPECTATIONS["mhg/zh-ko"]["capabilities"],
+        )
+        self.assertEqual(
+            resolution["enabled"]["language_policy.register@1"]["provider"][
+                "api_version"
+            ],
+            2,
+        )
+        self.assertEqual(
+            resolution["enabled"]["language_policy.register@1"]["asset"],
+            "context_rules",
+        )
+        self.assertEqual(
+            resolution["enabled"]["assets.entity_registry@1"]["asset"],
+            "entities",
+        )
+        self.assertEqual(
+            resolution["enabled"]["source_provenance@1"]["asset"],
+            "project_sources",
+        )
+        self.assertEqual(resolution["warnings"], [])
 
 
 if __name__ == "__main__":

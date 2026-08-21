@@ -29,6 +29,8 @@ from lqe_suggestions import (
     _canonical_size,
     _suggestion_verifier_instruction_input,
     _load_live,
+    _load_suggestion_candidate_rules,
+    _suggestion_guard_version,
     _publisher_receipt,
     _review_packet_worker_receipts,
     _validate_publisher_receipt,
@@ -43,6 +45,7 @@ from lqe_suggestions import (
     validate_suggestion_artifact,
 )
 from lqe_split_contract import canonical_digest
+from lqe_suggestion_control import require_immutable_publication
 from lqe_target_form import load_target_form_policy
 
 
@@ -126,7 +129,12 @@ def validate_review_packet(
         raise ValueError("suggestion review packet reviewed ids are stale")
     if [entry.get("id") for entry in packet["entries"]] != expected_ids:
         raise ValueError("suggestion review packet entry coverage is invalid")
-    verifier_instructions, _ = _suggestion_verifier_instruction_input()
+    guard_version = packet.get("instructions", {}).get(
+        "candidate_guard_version", 0
+    )
+    verifier_instructions, _ = _suggestion_verifier_instruction_input(
+        guard_version
+    )
     if packet["instructions"].get("verifier_instructions") != verifier_instructions:
         raise ValueError("suggestion review packet verifier instructions are stale")
     for key in (
@@ -158,6 +166,30 @@ def validate_review_packet(
     ):
         raise ValueError("suggestion review packet differs from live generation evidence")
     return packet
+
+
+def _validate_rule_verifications(verdict: dict, entry: dict, required: bool) -> None:
+    if not required:
+        return
+    assertions = entry.get("applicable_rule_assertions", [])
+    verifications = verdict.get("rule_verifications")
+    if not isinstance(verifications, list):
+        raise ValueError(
+            f"suggestion review id {verdict['id']} rule verifications are missing"
+        )
+    expected_rule_ids = [item["rule_id"] for item in assertions]
+    actual_rule_ids = [item.get("rule_id") for item in verifications]
+    if actual_rule_ids != expected_rule_ids:
+        raise ValueError(
+            f"suggestion review id {verdict['id']} rule coverage is incomplete"
+        )
+    if verdict["decision"] == "accept" and any(
+        item.get("status") != "pass" for item in verifications
+    ):
+        raise ValueError(
+            f"suggestion review id {verdict['id']} cannot accept without passing "
+            "every applicable project rule"
+        )
 
 
 def validate_review_draft(draft: object, packet: dict) -> dict:
@@ -203,6 +235,9 @@ def validate_review_draft(draft: object, packet: dict) -> dict:
     if verdict_ids != packet["reviewed_ids"] or len(verdict_ids) != len(set(verdict_ids)):
         raise ValueError("suggestion review draft verdict coverage is invalid")
     packet_entries = {entry["id"]: entry for entry in packet["entries"]}
+    rule_attestation_required = packet.get("instructions", {}).get(
+        "rule_attestation_required", False
+    )
     for verdict in draft["verdicts"]:
         entry = packet_entries[verdict["id"]]
         if verdict["candidate_digest"] != entry["candidate_digest"]:
@@ -230,6 +265,7 @@ def validate_review_draft(draft: object, packet: dict) -> dict:
                 f"suggestion review draft id {verdict['id']} cannot accept "
                 "without passing every semantic and tone check"
             )
+        _validate_rule_verifications(verdict, entry, rule_attestation_required)
     return draft
 
 
@@ -448,8 +484,12 @@ def validate_review_artifact(artifact: object, packet: dict) -> dict:
     if verdict_ids != packet["reviewed_ids"]:
         raise ValueError("suggestion review artifact verdict coverage is invalid")
     packet_entries = {entry["id"]: entry for entry in packet["entries"]}
+    rule_attestation_required = packet.get("instructions", {}).get(
+        "rule_attestation_required", False
+    )
     for verdict in artifact["verdicts"]:
-        if verdict["candidate_digest"] != packet_entries[verdict["id"]]["candidate_digest"]:
+        packet_entry = packet_entries[verdict["id"]]
+        if verdict["candidate_digest"] != packet_entry["candidate_digest"]:
             raise ValueError("suggestion review artifact changed a candidate")
         if verdict["decision"] != "accept" and not verdict["reason_codes"]:
             raise ValueError("suggestion review artifact is missing reason codes")
@@ -462,6 +502,9 @@ def validate_review_artifact(artifact: object, packet: dict) -> dict:
             raise ValueError(
                 "suggestion review artifact accepted an unverified semantic field"
             )
+        _validate_rule_verifications(
+            verdict, packet_entry, rule_attestation_required
+        )
     return artifact
 
 
@@ -590,7 +633,12 @@ def _review_packet_input_bytes(
     if relative.is_absolute() or ".." in relative.parts:
         raise ValueError("suggestion verifier content index path is unsafe")
     content_index = read_json(job / relative)
-    verifier_summary, verifier_instructions = _suggestion_verifier_instruction_input()
+    guard_version = packet.get("instructions", {}).get(
+        "candidate_guard_version", 0
+    )
+    verifier_summary, verifier_instructions = _suggestion_verifier_instruction_input(
+        guard_version
+    )
     if verifier_summary != packet["instructions"]["verifier_instructions"]:
         raise ValueError("suggestion verifier instructions are stale")
     return measure_suggestion_worker_input(
@@ -746,7 +794,23 @@ def _build_review_packet_plan(
             "verify_source_meaning": True,
             "verify_all_known_issues": True,
             "verify_confirmed_constraints": True,
-            "verifier_instructions": _suggestion_verifier_instruction_input()[0],
+            "verifier_instructions": _suggestion_verifier_instruction_input(
+                root_generation.get("instructions", {}).get(
+                    "candidate_guard_version", 0
+                )
+            )[0],
+            **(
+                {
+                    "candidate_guard_version": root_generation["instructions"][
+                        "candidate_guard_version"
+                    ],
+                    "rule_attestation_required": True,
+                }
+                if root_generation.get("instructions", {}).get(
+                    "candidate_guard_version", 0
+                ) >= 2
+                else {}
+            ),
             "worker_context": {
                 "input_measurement_path": (
                     f"{REVIEW_CONTEXT_DIR}/{REVIEW_INPUT_MEASUREMENT_NAME}"
@@ -867,6 +931,8 @@ def _load_live_chain_plan(
         generation_packet,
         segments,
         target_form_policy=load_target_form_policy(state),
+        candidate_rules=_load_suggestion_candidate_rules(state),
+        candidate_guard_version=_suggestion_guard_version(state),
     )
     review_plan = _build_review_packet_plan(job, generation_plan, candidate)
     return (
@@ -964,6 +1030,17 @@ def cmd_publish_review(args) -> None:
             drafts,
         )
     output = Path(args.out) if args.out else job / REVIEW_ARTIFACT_NAME
+    if require_immutable_publication(
+        job,
+        output,
+        artifact,
+        getattr(args, "authorization_file", None),
+        action="revise_suggestion_review",
+        job_id=artifact["job_id"],
+        results_basis_digest=artifact["results_basis_digest"],
+    ):
+        print(f"[lqe_suggestion_review] Review artifact unchanged → {output}")
+        return
     write_json_atomic(output, artifact)
     print(
         f"[lqe_suggestion_review] Review artifact → {output} "
@@ -1005,6 +1082,17 @@ def cmd_publish_final(args) -> None:
         target_form_policy=load_target_form_policy(state),
     )
     output = Path(args.out) if args.out else job / ARTIFACT_NAME
+    if require_immutable_publication(
+        job,
+        output,
+        artifact,
+        getattr(args, "authorization_file", None),
+        action="revise_final_suggestions",
+        job_id=artifact["job_id"],
+        results_basis_digest=artifact["results_basis_digest"],
+    ):
+        print(f"[lqe_suggestion_review] Final v5 unchanged → {output}")
+        return
     write_json_atomic(output, artifact)
     print(
         f"[lqe_suggestion_review] Final v5 → {output} "
@@ -1028,9 +1116,17 @@ def build_parser() -> argparse.ArgumentParser:
             command.set_defaults(func=cmd_prepare)
         elif name == "publish-review":
             command.add_argument("--input")
+            command.add_argument(
+                "--authorization-file",
+                help="one-time user authorization required to revise an artifact",
+            )
             command.set_defaults(func=cmd_publish_review)
         else:
             command.add_argument("--review")
+            command.add_argument(
+                "--authorization-file",
+                help="one-time user authorization required to revise an artifact",
+            )
             command.set_defaults(func=cmd_publish_final)
     return parser
 

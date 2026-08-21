@@ -1442,12 +1442,15 @@ class BundleSetAndManifestTests(ContextBundleFixture):
             suggestion_bundle_set,
             max_worker_bytes=1_000_000,
             common_instructions_path=self.files["common"],
-            module_instructions_path=self.files["suggestions"],
             suggestion_instructions_path=self.files["suggestions"],
         )
         self.assertEqual(
             suggestion["instructions"]["suggestions"]["sha256"],
             hashlib.sha256(self.files["suggestions"].read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            suggestion["instructions"]["module"]["sha256"],
+            suggestion["instructions"]["suggestions"]["sha256"],
         )
 
     def test_selected_evidence_index_records_actual_module_selection(self):

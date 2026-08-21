@@ -24,11 +24,13 @@ from lqe_corrections import (
     normalize_check_entries,
 )
 from lqe_engine import (
+    apply_severity,
     current_target,
     disabled_modules,
     get_check_scope,
     get_review_policy,
     load_terms,
+    load_scorecard_profile,
     optional_modules,
     read_json as load,
     require_current_job_runtime,
@@ -885,6 +887,21 @@ def cmd_split(a):
     print(f"[split] src+tgt chars/chunk: {vols}")
 
 
+def _canonicalize_forced_severities(state: dict, issues: list[dict]) -> list[dict]:
+    scoring_policy = state.get("scoring_policy")
+    if not isinstance(scoring_policy, dict):
+        scoring_policy = {}
+    profile = load_scorecard_profile(
+        scoring_policy.get("scorecard_profile", "legacy")
+    )
+    output = copy.deepcopy(issues)
+    for issue in output:
+        issue["severity"] = apply_severity(
+            issue.get("category", ""), issue.get("severity", ""), profile
+        )
+    return output
+
+
 def _cmd_merge_unlocked(a, state: dict, outdir: Path):
     state_segments = state["segments"]
     state_by_id = {segment["id"]: segment for segment in state_segments}
@@ -1065,6 +1082,7 @@ def _cmd_merge_unlocked(a, state: dict, outdir: Path):
             issues = copy.deepcopy(pre_by_id.get(i, []))
             if bound_results:
                 issues = [_mark_machine_precheck(issue) for issue in issues]
+        issues = _canonicalize_forced_severities(state, issues)
         out.append(
             build_segment_result(
                 segment,
