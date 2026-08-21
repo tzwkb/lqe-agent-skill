@@ -26,5 +26,8 @@ projects/**/profile_pre*.json
 !projects/*/*/sg*.txt
 !projects/*/*/sg*.md
 !projects/*/*/terms*.json
+projects/**/*.bak
+projects/**/*.bak.*
+.chunks.lock
 .~*
 ~$*

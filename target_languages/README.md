@@ -12,7 +12,7 @@ target_languages/<code>/
 └── eval_notes.md     语言级 AI 评估关注点（可选；read 拷入 job/lang_notes.md，Step 2 注入）
 ```
 
-`<code>` = profile `target_lang`（如 `zh-th` → `th`），或 `read --target-lang` 显式指定。已建：`en`、`th`、`tr`、`zh`。
+`<code>` = profile `target_lang`（如 `zh-th` → `th`），或 `read --target-lang` 显式指定。当前可用语言包以本目录实际存在的 `<code>/` 子目录为准。
 
 ## attributes.json schema
 
