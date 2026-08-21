@@ -14,14 +14,19 @@ from xml.parsers import expat
 
 
 XLIFF_NS = "urn:oasis:names:tc:xliff:document:1.2"
+XLIFF2_NS = "urn:oasis:names:tc:xliff:document:2.0"
 SDL_NS = "http://sdl.com/FileTypes/SdlXliff/1.0"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
 
 _X = "{" + XLIFF_NS + "}"
+_X2 = "{" + XLIFF2_NS + "}"
 _SDL = "{" + SDL_NS + "}"
 _INLINE_NAMES = {"g", "x", "bx", "ex", "ph", "bpt", "ept", "it", "sub", "mrk"}
 _NATIVE_CODE_NAMES = {"bpt", "ept", "it", "ph"}
+_XLIFF2_INLINE_NAMES = {"cp", "ec", "em", "mrk", "pc", "ph", "sc", "sm"}
+_XLIFF2_NATIVE_CODE_NAMES = {"cp", "ec", "em", "ph", "sc", "sm"}
 _TABULAR_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xlsm"}
+_XLIFF_SUFFIXES = {".sdlxliff", ".xliff", ".xlf"}
 _TRUE_VALUES = {"1", "true", "yes"}
 _TM_POLICIES = {"candidate-only", "protect-exact-source-and-target"}
 _OPTION_KEYS = {"tm_protection", "content_type_rules", "exclude_rules"}
@@ -600,6 +605,54 @@ def _parse_xml(
     return root, namespace_map, namespace_declarations
 
 
+def _parse_xliff2_xml(
+    data: bytes,
+    relative_path: str,
+) -> tuple[ET.Element, dict[str, str], list[tuple[str, str]]]:
+    _reject_dtd_and_entities(data, relative_path)
+    namespace_map: dict[str, str] = {}
+    namespace_declarations: list[tuple[str, str]] = []
+    try:
+        parser = ET.iterparse(BytesIO(data), events=("start-ns", "end"))
+        for event, value in parser:
+            if event == "start-ns":
+                prefix, uri = value
+                normalized_prefix = prefix or ""
+                namespace_map.setdefault(normalized_prefix, uri)
+                namespace_declarations.append((normalized_prefix, uri))
+        root = parser.root
+    except ET.ParseError as exc:
+        line, column = getattr(exc, "position", (None, None))
+        location = (
+            f"line {line}, column {column}"
+            if line is not None
+            else "unknown location"
+        )
+        raise SDLXLIFFImportError(
+            f"{relative_path}: {location}: invalid XML: {exc}"
+        ) from exc
+    if root.tag != _X2 + "xliff" or root.get("version") != "2.0":
+        _fail("expected XLIFF 2.0 root namespace and version", relative_path)
+    return root, namespace_map, namespace_declarations
+
+
+def _document_kind(data: bytes, relative_path: str) -> str:
+    _reject_dtd_and_entities(data, relative_path)
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        line, column = getattr(exc, "position", (None, None))
+        raise SDLXLIFFImportError(
+            f"{relative_path}: line {line}, column {column}: invalid XML: {exc}"
+        ) from exc
+    if root.tag == _X2 + "xliff" and root.get("version") == "2.0":
+        return "xliff2"
+    if root.tag == _X + "xliff" and root.get("version") == "1.2":
+        _parse_xml(data, relative_path)
+        return "sdlxliff1"
+    _fail("supported inputs are SDLXLIFF 1.2 and XLIFF 2.0", relative_path)
+
+
 def _selected_files(path: Path) -> tuple[list[tuple[Path, str]], list[str]]:
     if not path.exists():
         raise SDLXLIFFImportError(f"input path does not exist: {path}")
@@ -609,12 +662,13 @@ def _selected_files(path: Path) -> tuple[list[tuple[Path, str]], list[str]]:
         (
             candidate
             for candidate in path.rglob("*")
-            if candidate.is_file() and candidate.suffix.casefold() == ".sdlxliff"
+            if candidate.is_file()
+            and candidate.suffix.casefold() in _XLIFF_SUFFIXES
         ),
         key=lambda candidate: candidate.relative_to(path).as_posix(),
     )
     if not selected:
-        raise SDLXLIFFImportError(f"no SDLXLIFF files found in directory: {path}")
+        raise SDLXLIFFImportError(f"no XLIFF files found in directory: {path}")
     unselected = sorted(
         candidate.relative_to(path).as_posix()
         for candidate in path.rglob("*")
@@ -1181,6 +1235,453 @@ def _internal_file_summary(root: ET.Element) -> dict[str, int | bool]:
     }
 
 
+def _serialize_xliff2_mixed(
+    element: ET.Element,
+    namespace_map: dict[str, str],
+) -> SerializedMixedContent:
+    signature: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+    plain: list[str] = []
+
+    def visit(parent: ET.Element, translatable: bool) -> None:
+        if translatable and parent.text:
+            plain.append(parent.text)
+        for child in parent:
+            namespace, local = _split_qname(child.tag)
+            if namespace == XLIFF2_NS and local in _XLIFF2_INLINE_NAMES:
+                signature.append(
+                    (
+                        child.tag,
+                        tuple(
+                            (name, str(value))
+                            for name, value in sorted(child.attrib.items())
+                        ),
+                    )
+                )
+            child_translatable = translatable and not (
+                namespace == XLIFF2_NS
+                and local in _XLIFF2_NATIVE_CODE_NAMES
+            )
+            visit(child, child_translatable)
+            if translatable and child.tail:
+                plain.append(child.tail)
+
+    visit(element, True)
+    return SerializedMixedContent(
+        display=_content_xml(element, namespace_map, raw=False),
+        plain="".join(plain),
+        raw_xml=_content_xml(element, namespace_map, raw=True),
+        tag_signature=tuple(signature),
+    )
+
+
+def _xliff2_notes(unit: ET.Element, segment: ET.Element) -> str | None:
+    values: list[str] = []
+    for scope in (unit, segment):
+        for notes in scope:
+            if notes.tag != _X2 + "notes":
+                continue
+            for note in notes:
+                if note.tag != _X2 + "note":
+                    continue
+                value = "".join(note.itertext()).strip()
+                if value:
+                    values.append(value)
+    return "\n".join(dict.fromkeys(values)) or None
+
+
+def _iter_xliff2_units(parent: ET.Element):
+    for child in parent:
+        if child.tag == _X2 + "unit":
+            yield child
+        elif child.tag == _X2 + "group":
+            yield from _iter_xliff2_units(child)
+
+
+def _xliff2_locked(
+    file_element: ET.Element,
+    unit: ET.Element,
+    segment: ET.Element,
+    parent_by_identity: Mapping[int, ET.Element],
+) -> bool:
+    scopes = [segment, unit]
+    parent = parent_by_identity.get(id(unit))
+    while parent is not None and parent is not file_element:
+        scopes.append(parent)
+        parent = parent_by_identity.get(id(parent))
+    scopes.append(file_element)
+    return any(
+        (_local_attribute(scope, "translate") or "").casefold() == "no"
+        for scope in scopes
+    )
+
+
+def _xliff2_extension_xml(
+    unit: ET.Element,
+    segment: ET.Element,
+    namespace_map: dict[str, str],
+) -> list[str]:
+    values: list[str] = []
+    for scope in (unit, segment):
+        for child in scope:
+            namespace, _ = _split_qname(child.tag)
+            if namespace not in {XLIFF2_NS, XML_NS}:
+                values.append(_serialize_full(child, namespace_map))
+    return values
+
+
+def _read_xliff2_selected(
+    selected: list[tuple[Path, str]],
+    unselected: list[str],
+    options: SDLXLIFFOptions,
+    input_snapshots: Mapping[str, bytes],
+) -> SDLXLIFFImportResult:
+    segments: list[dict] = []
+    rows_raw: list[list[str]] = []
+    manifest_files: list[dict] = []
+    declared_languages: list[dict[str, str | None]] = []
+    extension_namespaces: set[str] = set()
+    content_type_matches: list[dict] = []
+    excluded: list[dict] = []
+    protection_evidence: list[dict] = []
+    parsed_segment_count = 0
+    locked_segment_count = 0
+
+    for input_path, relative_path in selected:
+        input_bytes = input_snapshots[relative_path]
+        root, namespace_map, namespace_declarations = _parse_xliff2_xml(
+            input_bytes, relative_path
+        )
+        source_language = _local_attribute(root, "srcLang")
+        target_language = _local_attribute(root, "trgLang")
+        declaration = {
+            "source_language": source_language,
+            "target_language": target_language,
+        }
+        declared_languages.append(declaration)
+        extension_namespaces.update(
+            uri
+            for _, uri in namespace_declarations
+            if uri not in {XLIFF2_NS, XML_NS}
+        )
+        file_elements = [child for child in root if child.tag == _X2 + "file"]
+        if not file_elements:
+            _fail("document contains no XLIFF file elements", relative_path)
+        input_language_declarations: list[dict[str, str | None]] = []
+
+        for file_index, file_element in enumerate(file_elements):
+            input_language_declarations.append(dict(declaration))
+            file_original = _local_attribute(file_element, "original")
+            parent_by_identity = {
+                id(child): parent
+                for parent in file_element.iter()
+                for child in parent
+            }
+            units = list(_iter_xliff2_units(file_element))
+            if not units:
+                _fail(
+                    "XLIFF 2.0 file contains no unit elements",
+                    _context(relative_path, file_index=file_index),
+                )
+            seen_business_keys: set[tuple[str, str]] = set()
+            for unit_index, unit in enumerate(units):
+                unit_id = _local_attribute(unit, "id")
+                if not unit_id:
+                    _fail(
+                        "XLIFF 2.0 unit is missing id",
+                        _context(relative_path, file_index=file_index),
+                    )
+                segment_elements = [
+                    child for child in unit if child.tag == _X2 + "segment"
+                ]
+                for segment_index, xml_segment in enumerate(segment_elements):
+                    parsed_segment_count += 1
+                    segment_xml_id = _local_attribute(xml_segment, "id") or str(
+                        segment_index
+                    )
+                    business_key = (unit_id, segment_xml_id)
+                    if business_key in seen_business_keys:
+                        _fail(
+                            f"duplicate unit/segment business key {business_key!r}",
+                            _context(
+                                relative_path,
+                                file_index=file_index,
+                                tu_id=unit_id,
+                                tu_index=unit_index,
+                                segment_id=segment_xml_id,
+                                segment_index=segment_index,
+                            ),
+                        )
+                    seen_business_keys.add(business_key)
+                    source_elements = [
+                        child
+                        for child in xml_segment
+                        if child.tag == _X2 + "source"
+                    ]
+                    target_elements = [
+                        child
+                        for child in xml_segment
+                        if child.tag == _X2 + "target"
+                    ]
+                    if len(source_elements) != 1:
+                        _fail(
+                            "XLIFF 2.0 segment must contain exactly one source",
+                            f"{relative_path}, unit {unit_id!r}, segment {segment_xml_id!r}",
+                        )
+                    if len(target_elements) > 1:
+                        _fail(
+                            "XLIFF 2.0 segment contains multiple targets",
+                            f"{relative_path}, unit {unit_id!r}, segment {segment_xml_id!r}",
+                        )
+                    source = _serialize_xliff2_mixed(
+                        source_elements[0], namespace_map
+                    )
+                    target = (
+                        _serialize_xliff2_mixed(target_elements[0], namespace_map)
+                        if target_elements
+                        else _EMPTY_MIXED
+                    )
+                    locked = _xliff2_locked(
+                        file_element,
+                        unit,
+                        xml_segment,
+                        parent_by_identity,
+                    )
+                    if locked:
+                        locked_segment_count += 1
+                    source_ref = {
+                        "relative_path": relative_path,
+                        "file_index": file_index,
+                        "tu_id": unit_id,
+                        "tu_index": unit_index,
+                        "sdl_segment_id": segment_xml_id,
+                        "segment_index": segment_index,
+                        "unit_id": unit_id,
+                        "segment_id": segment_xml_id,
+                    }
+                    metadata = {
+                        "xml_format": "xliff2",
+                        "xml_version": "2.0",
+                        "file_original": file_original,
+                        "source_language": source_language,
+                        "target_language": target_language,
+                        "confirmation": _local_attribute(xml_segment, "state"),
+                        "origin": None,
+                        "match_percent": None,
+                        "text_match": None,
+                        "locked": locked,
+                        "last_modified_by": None,
+                        "comment": _xliff2_notes(unit, xml_segment),
+                        "source_raw_xml": source.raw_xml,
+                        "target_raw_xml": target.raw_xml,
+                        "source_tag_signature": source.tag_signature,
+                        "target_tag_signature": target.tag_signature,
+                        "extension_xml": _xliff2_extension_xml(
+                            unit, xml_segment, namespace_map
+                        ),
+                        "extension_attributes": [],
+                    }
+                    content_type, content_type_rule_id = match_content_type(
+                        relative_path, options.content_type_rules
+                    )
+                    rule_candidate = {
+                        "relative_path": relative_path,
+                        "file_original": file_original,
+                        "confirmation": metadata["confirmation"],
+                        "origin": None,
+                        "locked": locked,
+                        "source": source.display,
+                        "target": target.display,
+                    }
+                    exclusion_matches = match_exclusions(
+                        rule_candidate, options.exclude_rules
+                    )
+                    if not source.display.strip() and not target.display.strip():
+                        exclusion_matches.append(
+                            {
+                                "id": "blank-both-sides",
+                                "reason": "Source and target are both blank",
+                                "field": "source,target",
+                                "operator": "built-in",
+                                "expected": "blank",
+                                "actual": {
+                                    "source": source.display,
+                                    "target": target.display,
+                                },
+                            }
+                        )
+                    included = not exclusion_matches
+                    segment_id = len(segments) if included else None
+                    effective_reason = "SOURCE_LOCKED" if locked and included else None
+                    evidence = {
+                        "locked": {
+                            "matched": locked,
+                            "reason": "SOURCE_LOCKED" if locked else None,
+                        },
+                        "tm": {
+                            "exact_match": False,
+                            "candidate": False,
+                            "protected_by_policy": False,
+                            "conditions": _tm_evidence(metadata),
+                        },
+                        "effective_reason": effective_reason,
+                    }
+                    protection_evidence.append(
+                        {
+                            "segment_id": segment_id,
+                            "source_ref": dict(source_ref),
+                            "included": included,
+                            **evidence,
+                        }
+                    )
+                    if content_type_rule_id is not None:
+                        content_type_matches.append(
+                            {
+                                "segment_id": segment_id,
+                                "source_ref": dict(source_ref),
+                                "rule_id": content_type_rule_id,
+                                "content_type": content_type,
+                                "included": included,
+                            }
+                        )
+                    if exclusion_matches:
+                        excluded.append(
+                            {
+                                "source_ref": dict(source_ref),
+                                "rule_ids": [
+                                    match["id"] for match in exclusion_matches
+                                ],
+                                "reasons": [
+                                    match["reason"] for match in exclusion_matches
+                                ],
+                                "matches": exclusion_matches,
+                                "content_type": content_type,
+                                "content_type_rule_id": content_type_rule_id,
+                            }
+                        )
+                        continue
+                    segment = {
+                        "id": segment_id,
+                        "source_ref": source_ref,
+                        "source": source.display,
+                        "target": target.display,
+                        "source_plain": source.plain,
+                        "target_plain": target.plain,
+                        "corrected": None,
+                        "content_type": content_type,
+                        "content_type_rule_id": content_type_rule_id,
+                        "protection_evidence": evidence,
+                        "metadata": {"sdlxliff": metadata},
+                    }
+                    if effective_reason is not None:
+                        segment["protected"] = True
+                        segment["protected_reason"] = effective_reason
+                    segments.append(segment)
+                    rows_raw.append(
+                        [
+                            relative_path,
+                            unit_id,
+                            segment_xml_id,
+                            source.display,
+                            target.display,
+                        ]
+                    )
+        manifest_files.append(
+            {
+                "relative_path": relative_path,
+                "sha256": hashlib.sha256(input_bytes).hexdigest(),
+                "format": "xliff2",
+                "version": "2.0",
+                "namespaces": dict(sorted(namespace_map.items())),
+                "namespace_declarations": [
+                    {"prefix": prefix, "uri": uri}
+                    for prefix, uri in namespace_declarations
+                ],
+                "languages": input_language_declarations,
+                "internal_file": {"present": False, "size": 0},
+            }
+        )
+
+    source_lang = next(
+        (
+            item["source_language"]
+            for item in declared_languages
+            if item["source_language"]
+        ),
+        "",
+    )
+    target_lang = next(
+        (
+            item["target_language"]
+            for item in declared_languages
+            if item["target_language"]
+        ),
+        "",
+    )
+    manifest = {
+        "schema": "lqe.xliff.import-manifest",
+        "version": 1,
+        "importer": {
+            "name": "xliff2",
+            "schema": "lqe.xliff.import-manifest",
+            "version": 1,
+        },
+        "input_format": "xliff",
+        "files": manifest_files,
+        "languages": declared_languages,
+        "extension_namespaces": sorted(extension_namespaces),
+        "rules": {
+            "content_type": list(options.content_type_rules),
+            "exclusions": list(options.exclude_rules),
+        },
+        "rule_matches": {
+            "content_type": content_type_matches,
+            "exclusions": [
+                {
+                    "source_ref": item["source_ref"],
+                    "rule_ids": [
+                        rule_id
+                        for rule_id in item["rule_ids"]
+                        if rule_id != "blank-both-sides"
+                    ],
+                }
+                for item in excluded
+                if any(
+                    rule_id != "blank-both-sides"
+                    for rule_id in item["rule_ids"]
+                )
+            ],
+        },
+        "content_type_matches": content_type_matches,
+        "excluded": excluded,
+        "counts": {
+            "selected_files": len(selected),
+            "unselected_supported_files": len(unselected),
+            "parsed_segments": parsed_segment_count,
+            "included_segments": len(segments),
+            "excluded_segments": len(excluded),
+            "content_type_matches": len(content_type_matches),
+            "tm_candidates": 0,
+            "locked_segments": locked_segment_count,
+            "protected_segments": sum(
+                1 for segment in segments if segment.get("protected")
+            ),
+        },
+        "tm_protection": options.tm_protection,
+        "protection_evidence": protection_evidence,
+        "unselected_supported_files": unselected,
+    }
+    return SDLXLIFFImportResult(
+        headers=["来源文件", "Unit ID", "Segment ID", "原文", "译文"],
+        rows_raw=rows_raw,
+        segments=segments,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        input_paths=[str(input_path.resolve()) for input_path, _ in selected],
+        manifest=manifest,
+        tm_candidates={"candidate_ids": [], "segments": []},
+    )
+
+
 def read_sdlxliff(
     path: Path,
     *,
@@ -1196,6 +1697,22 @@ def read_sdlxliff(
         }
     )
     selected, unselected = _selected_files(Path(path))
+    input_snapshots = {
+        relative_path: input_path.read_bytes()
+        for input_path, relative_path in selected
+    }
+    document_kinds = {
+        _document_kind(input_snapshots[relative_path], relative_path)
+        for _, relative_path in selected
+    }
+    if len(document_kinds) != 1:
+        raise SDLXLIFFImportError(
+            "one input job cannot mix SDLXLIFF 1.2 and XLIFF 2.0 files"
+        )
+    if document_kinds == {"xliff2"}:
+        return _read_xliff2_selected(
+            selected, unselected, options, input_snapshots
+        )
     segments: list[dict] = []
     rows_raw: list[list[str]] = []
     manifest_files: list[dict] = []
@@ -1210,7 +1727,7 @@ def read_sdlxliff(
     locked_segment_count = 0
 
     for input_path, relative_path in selected:
-        input_bytes = input_path.read_bytes()
+        input_bytes = input_snapshots[relative_path]
         root, namespace_map, namespace_declarations = _parse_xml(
             input_bytes, relative_path
         )
@@ -1531,3 +2048,272 @@ def read_sdlxliff(
             "segments": tm_candidate_segments,
         },
     )
+
+
+def _register_namespaces(namespace_map: Mapping[str, str]) -> None:
+    for prefix, uri in namespace_map.items():
+        if prefix == "xml" or re.fullmatch(r"ns\d+", prefix or ""):
+            continue
+        try:
+            ET.register_namespace(prefix, uri)
+        except ValueError:
+            continue
+
+
+def _fragment_root(
+    value: str,
+    *,
+    namespace_map: Mapping[str, str],
+    default_namespace: str,
+) -> ET.Element:
+    declarations = [f'xmlns="{escape(default_namespace, quote=True)}"']
+    for prefix, uri in sorted(namespace_map.items()):
+        if not prefix or prefix == "xml" or uri == default_namespace:
+            continue
+        declarations.append(
+            f'xmlns:{prefix}="{escape(uri, quote=True)}"'
+        )
+    wrapper = f"<lqe-wrapper {' '.join(declarations)}>{value}</lqe-wrapper>"
+    try:
+        return ET.fromstring(wrapper)
+    except ET.ParseError as exc:
+        if "<" not in value and ">" not in value:
+            fallback = ET.Element("lqe-wrapper")
+            fallback.text = value
+            return fallback
+        raise SDLXLIFFImportError(
+            f"corrected mixed content is not well-formed XML: {exc}"
+        ) from exc
+
+
+def _replace_mixed_content(
+    target: ET.Element,
+    value: str,
+    *,
+    namespace_map: Mapping[str, str],
+    default_namespace: str,
+) -> None:
+    wrapper = _fragment_root(
+        value,
+        namespace_map=namespace_map,
+        default_namespace=default_namespace,
+    )
+    for child in list(target):
+        target.remove(child)
+    target.text = wrapper.text
+    for child in list(wrapper):
+        wrapper.remove(child)
+        target.append(child)
+
+
+def _insert_after(parent: ET.Element, anchor: ET.Element, child: ET.Element) -> None:
+    parent.insert(list(parent).index(anchor) + 1, child)
+
+
+def _v1_target_for_segment(
+    tu: ET.Element,
+    source_ref: Mapping[str, object],
+) -> ET.Element:
+    context = str(source_ref.get("relative_path") or "SDLXLIFF")
+    seg_source = _single_direct_child(tu, "seg-source", context)
+    source = _single_direct_child(tu, "source", context)
+    target = _single_direct_child(tu, "target", context)
+    segment_id = source_ref.get("sdl_segment_id")
+    if seg_source is None:
+        if target is None:
+            target = ET.Element(_X + "target")
+            anchor = source
+            if anchor is None:
+                _fail("trans-unit is missing source", context)
+            _insert_after(tu, anchor, target)
+        return target
+
+    if target is None:
+        target = ET.Element(_X + "target")
+        _insert_after(tu, seg_source, target)
+    markers = [
+        item
+        for item in target.iter(_X + "mrk")
+        if _local_attribute(item, "mtype") == "seg"
+    ]
+    if not markers:
+        target.text = None
+        for child in list(target):
+            target.remove(child)
+        for source_marker in _segmentation_markers(seg_source, context):
+            marker = ET.SubElement(
+                target,
+                _X + "mrk",
+                {
+                    "mtype": "seg",
+                    "mid": _local_attribute(source_marker, "mid") or "",
+                },
+            )
+            marker.text = None
+        markers = list(target)
+    matches = [
+        marker
+        for marker in markers
+        if _local_attribute(marker, "mid") == segment_id
+    ]
+    if len(matches) != 1:
+        _fail(
+            f"cannot locate target mrk for segment {segment_id!r}",
+            context,
+        )
+    return matches[0]
+
+
+def _render_v1_writeback(
+    root: ET.Element,
+    namespace_map: Mapping[str, str],
+    refs: list[tuple[Mapping[str, object], str]],
+) -> None:
+    files = [child for child in root if child.tag == _X + "file"]
+    for source_ref, corrected in refs:
+        file_index = int(source_ref.get("file_index", 0))
+        if file_index < 0 or file_index >= len(files):
+            _fail("file index no longer exists", str(source_ref.get("relative_path")))
+        body = _single_direct_tag(
+            files[file_index],
+            _X + "body",
+            "body",
+            str(source_ref.get("relative_path")),
+        )
+        if body is None:
+            _fail("XLIFF file is missing body", str(source_ref.get("relative_path")))
+        units = list(_iter_trans_units(body, str(source_ref.get("relative_path"))))
+        unit_index = int(source_ref.get("tu_index", 0))
+        if unit_index < 0 or unit_index >= len(units):
+            _fail("trans-unit index no longer exists", str(source_ref.get("relative_path")))
+        tu = units[unit_index]
+        expected_tu_id = source_ref.get("tu_id")
+        if expected_tu_id is not None and _local_attribute(tu, "id") != expected_tu_id:
+            _fail("trans-unit id changed after read", str(source_ref.get("relative_path")))
+        target = _v1_target_for_segment(tu, source_ref)
+        _replace_mixed_content(
+            target,
+            corrected,
+            namespace_map=namespace_map,
+            default_namespace=XLIFF_NS,
+        )
+
+
+def _render_v2_writeback(
+    root: ET.Element,
+    namespace_map: Mapping[str, str],
+    refs: list[tuple[Mapping[str, object], str]],
+) -> None:
+    files = [child for child in root if child.tag == _X2 + "file"]
+    for source_ref, corrected in refs:
+        file_index = int(source_ref.get("file_index", 0))
+        if file_index < 0 or file_index >= len(files):
+            _fail("file index no longer exists", str(source_ref.get("relative_path")))
+        units = list(_iter_xliff2_units(files[file_index]))
+        unit_index = int(source_ref.get("tu_index", 0))
+        if unit_index < 0 or unit_index >= len(units):
+            _fail("unit index no longer exists", str(source_ref.get("relative_path")))
+        unit = units[unit_index]
+        expected_unit_id = source_ref.get("unit_id", source_ref.get("tu_id"))
+        if _local_attribute(unit, "id") != expected_unit_id:
+            _fail("unit id changed after read", str(source_ref.get("relative_path")))
+        xml_segments = [
+            child for child in unit if child.tag == _X2 + "segment"
+        ]
+        segment_index = int(source_ref.get("segment_index", 0))
+        if segment_index < 0 or segment_index >= len(xml_segments):
+            _fail("segment index no longer exists", str(source_ref.get("relative_path")))
+        xml_segment = xml_segments[segment_index]
+        expected_segment_id = source_ref.get(
+            "segment_id", source_ref.get("sdl_segment_id")
+        )
+        actual_segment_id = _local_attribute(xml_segment, "id") or str(segment_index)
+        if actual_segment_id != expected_segment_id:
+            _fail("segment id changed after read", str(source_ref.get("relative_path")))
+        sources = [
+            child for child in xml_segment if child.tag == _X2 + "source"
+        ]
+        targets = [
+            child for child in xml_segment if child.tag == _X2 + "target"
+        ]
+        if len(sources) != 1 or len(targets) > 1:
+            _fail("segment source/target structure changed after read", str(source_ref.get("relative_path")))
+        if targets:
+            target = targets[0]
+        else:
+            target = ET.Element(_X2 + "target")
+            _insert_after(xml_segment, sources[0], target)
+        _replace_mixed_content(
+            target,
+            corrected,
+            namespace_map=namespace_map,
+            default_namespace=XLIFF2_NS,
+        )
+
+
+def render_xliff_writeback(
+    path: Path,
+    *,
+    segments: Sequence[Mapping[str, object]],
+    corrections: Mapping[int, str],
+) -> list[tuple[str, bytes]]:
+    selected, _ = _selected_files(Path(path))
+    by_path: dict[str, list[tuple[Mapping[str, object], str]]] = {}
+    known_ids = set()
+    for segment in segments:
+        segment_id = segment.get("id")
+        if type(segment_id) is not int:
+            raise SDLXLIFFImportError("segment id must be an integer")
+        if segment_id in known_ids:
+            raise SDLXLIFFImportError(f"duplicate segment id: {segment_id}")
+        known_ids.add(segment_id)
+        if segment_id not in corrections:
+            continue
+        corrected = corrections[segment_id]
+        if not isinstance(corrected, str):
+            raise SDLXLIFFImportError(
+                f"correction for segment {segment_id} must be a string"
+            )
+        source_ref = segment.get("source_ref")
+        if not isinstance(source_ref, Mapping):
+            raise SDLXLIFFImportError(
+                f"segment {segment_id} has no source_ref"
+            )
+        relative_path = source_ref.get("relative_path")
+        if not isinstance(relative_path, str) or not relative_path:
+            raise SDLXLIFFImportError(
+                f"segment {segment_id} has invalid source_ref.relative_path"
+            )
+        by_path.setdefault(relative_path, []).append((source_ref, corrected))
+    unknown = sorted(set(corrections) - known_ids)
+    if unknown:
+        raise SDLXLIFFImportError(f"unknown correction segment ids: {unknown}")
+    selected_paths = {relative_path for _, relative_path in selected}
+    unknown_paths = sorted(set(by_path) - selected_paths)
+    if unknown_paths:
+        raise SDLXLIFFImportError(
+            f"correction source paths are not in the input: {unknown_paths}"
+        )
+
+    outputs: list[tuple[str, bytes]] = []
+    for input_path, relative_path in selected:
+        data = input_path.read_bytes()
+        kind = _document_kind(data, relative_path)
+        if kind == "xliff2":
+            root, namespace_map, _ = _parse_xliff2_xml(data, relative_path)
+            _render_v2_writeback(
+                root, namespace_map, by_path.get(relative_path, [])
+            )
+        else:
+            root, namespace_map, _ = _parse_xml(data, relative_path)
+            _render_v1_writeback(
+                root, namespace_map, by_path.get(relative_path, [])
+            )
+        _register_namespaces(namespace_map)
+        outputs.append(
+            (
+                relative_path,
+                ET.tostring(root, encoding="utf-8", xml_declaration=True),
+            )
+        )
+    return outputs

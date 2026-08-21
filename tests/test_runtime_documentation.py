@@ -83,6 +83,25 @@ class RuntimeDocumentationTests(unittest.TestCase):
         self.assertIn('$JOB/suggestion_review.draft.json', SKILL_TEXT)
         self.assertIn('$JOB/suggestion_review_context', SKILL_TEXT)
 
+    def test_profile_validation_and_corpus_paths_are_production_documented(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "lqe_profile_ingest.py"),
+                "validate",
+                "--help",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--schema", result.stdout)
+        self.assertIn("<profile.json>", CLI_TEXT)
+        self.assertIn("--input-format xliff", CLI_TEXT)
+        self.assertIn("--dry-run", CLI_TEXT)
+        self.assertNotIn("reserved stub", CLI_TEXT)
+
 
 if __name__ == "__main__":
     unittest.main()

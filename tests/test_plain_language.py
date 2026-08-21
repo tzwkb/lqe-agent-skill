@@ -98,7 +98,11 @@ class PlainLanguageTests(unittest.TestCase):
 
     def test_sdlxliff_boundaries_are_plain_and_visible(self):
         requirements = {
-            "SKILL.md": ("未知厂商扩展", "第一版不回写 SDLXLIFF XML"),
+            "SKILL.md": (
+                "未知厂商扩展",
+                "corrected XML",
+                "--input-format xliff",
+            ),
         }
         for path, phrases in requirements.items():
             content = (ROOT / path).read_text(encoding="utf-8")

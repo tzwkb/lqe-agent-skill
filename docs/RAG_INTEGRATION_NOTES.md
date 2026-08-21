@@ -8,7 +8,7 @@
 - `lqe_io.py read --project ...` 会保留输入表原始列到 `state.rows_raw`。
 - 当前不会把 `rag_references` 解析进 `segments`。
 - 当前不会把 RAG 注入 pre-check、单 agent prompt、chunk、lens 或评分。
-- `lqe_io.py ingest-corpus` 只是回流语料的 stub，不是评估时 RAG 接口。
+- `lqe_io.py ingest-corpus` 已实现 finalized 语料的版本化批量回流，但它不是评估时 RAG 接口；请求/回执合同见 `references/corpus_ingest.md`。
 
 因此，RAG 现在只是随输入表留档，不参与判错、修正或计分。
 
@@ -120,4 +120,4 @@ the current target differs from RAG.
 
 ## 当前决策
 
-暂不实施以上接入。保留本文档作为后续开发参考。
+评估时 RAG 注入仍不实施。finalized 语料回流是独立的显式外部写操作，不改变本节的上下文优先级或评分边界。

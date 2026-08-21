@@ -204,4 +204,4 @@ else
     echo "REVIEW-REQUIRED $1 SCORE=$SCORE STATUS=$STATUS MODE=$MODE APPLIED=0"
   fi
 fi
-ls -1 "$JOB"/*.xlsx 2>/dev/null | sed "s|$HOME|~|"
+find "$JOB" -maxdepth 1 \( -type f -name '*.xlsx' -o -type f -name '*_corrected.sdlxliff' -o -type f -name '*_corrected.xliff' -o -type f -name '*_corrected.xlf' -o -type d -name '*_corrected_xliff' \) -print 2>/dev/null | sort | sed "s|$HOME|~|"

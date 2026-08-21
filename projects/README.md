@@ -52,7 +52,7 @@
 
 `sdlxliff.tm_protection` 可取 `candidate-only` 或 `protect-exact-source-and-target`；CLI `--protect-exact-tm` 优先。`content_type_rules` 按顺序匹配大小写敏感的相对路径 glob，第一个命中生效。`exclude_rules` 必须有唯一 `id` 和非空 `reason`，可选 glob，并在 `relative_path`、`file_original`、`confirmation`、`origin`、`locked`、`source`、`target` 上使用且只使用一个 `equals` 或 `regex`。不得用不稳定的 job 段号，也不得根据 CC、FF、文件名或目录名推断内容类型。
 
-## SDLXLIFF 输入
+## SDLXLIFF/XLIFF 输入
 
 单个 SDLXLIFF 1.2 文件或目录可直接初始化：
 
@@ -63,9 +63,9 @@ python3 scripts/lqe_io.py read \
   --out jobs/<任务名>/state.json
 ```
 
-`--input-format` 可取 `auto`、`tabular`、`sdlxliff`。单文件和只含 SDLXLIFF 的目录可自动识别；混合格式目录必须显式指定 `sdlxliff`。目录递归读取并按相对路径排序；表格目录不支持。
+`--input-format` 可取 `auto`、`tabular`、`sdlxliff`、`xliff`。SDLXLIFF 1.2 使用 `sdlxliff`，XLIFF 2.0 使用 `xliff`；`.sdlxliff`、`.xliff`、`.xlf` 单文件和纯 XML 目录可自动识别。一个任务不得混用两个 XML 版本；表格目录不支持。
 
-第一版只支持带 SDL namespace 的 XLIFF 1.2；XLIFF 2.0 明确失败。未知厂商扩展若不影响句段定位、文本边界和 `mid` 配对，会保留并写入 state/manifest；出现结构歧义时失败，不猜测。
+运行时支持带 SDL namespace 的 XLIFF 1.2 与 XLIFF 2.0。XLIFF 2.0 省略根节点 `trgLang` 时，必须由项目 profile 或 `--target-lang` 明确补齐。未知厂商扩展若不影响句段定位和文本边界，会保留并写入 state/manifest；SDL `mid` 或 XLIFF 2.0 unit/segment 定位出现歧义时失败，不猜测。
 
 locked 段始终以 `SOURCE_LOCKED` 保护。默认 `candidate-only` 只把同时满足 `origin=tm`、`percent=100`、`text-match=SourceAndTarget` 的段写入 `tm_candidates.json`；候选只有在执行 `protect-segments` 后才成为当次任务的保护决定。profile 的 `protect-exact-source-and-target` 或 CLI `--protect-exact-tm` 是显式严格自动保护决定；单独的 100% 值不够。
 
@@ -146,13 +146,13 @@ chunks/
 
 - CSV/TSV 输入输出 `<任务名>_corrected.csv` 或 `<任务名>_corrected.tsv`，保持原行列和输入扩展名。
 - XLSX 输入输出 `<任务名>_corrected.xlsx`，保持工作簿、工作表、空行、列顺序和格式。
-- SDLXLIFF 输出新建固定 5 列的 `<任务名>_corrected.xlsx`。
+- SDLXLIFF/XLIFF 输出固定 5 列的 `<任务名>_corrected.xlsx` 配套表，并生成 corrected XML：单文件为 `<任务名>_corrected.<sdlxliff|xliff|xlf>`，目录为 `<任务名>_corrected_xliff/`。
 
 经验证的内部结果中，`corrected: ""` 是合法的整段删除；只有 `corrected: null` 表示没有建议修改。write、apply、export 和多工作表聚合都必须保留这一区别。
 
 SDLXLIFF 的 `source_manifest.json` 记录输入文件 SHA-256、语言、未知扩展 namespace、规则命中、纳入/排除原因和 locked/TM 证据；`tm_candidates.json` 单独记录严格候选。其 `LQE Results` 固定为来源文件、TU ID、SDL Segment ID、原文、原译、建议译文、处理方式、LQE Segment ID、LQE 错误序号、LQE AI 复核状态、LQE AI 编辑状态、LQE 检查来源、错误详情、Protected、Protection Evidence、LQE_Iter；同段多错误连续且每错误一行，`LQE_Iter` 固定在最后一列。新建的 corrected Excel 固定为来源文件、TU ID、SDL Segment ID、原文、译文。
 
-第一版不回写 SDLXLIFF XML；只导出标准 `<任务名>_corrected.xlsx`，原始 XML 保持不变。
+XML 回写只生成新的 corrected 文件或目录，原始 XML 保持不变。写出前会重验源文件集合与 SHA-256；源漂移、格式错误或事务发布失败时，不留下正式 corrected 产物。
 
 运行时默认继承 `state.scoring_policy`。仅 PASS 创建 `.finalized`；FAIL+single 不改当前译文、不完成；FAIL+iterate 只有至少应用一处重新验证通过的安全局部 edit 时，才更新 `current_target`/iteration、设置 `pending_recheck=true` 并返回 `PENDING-RECHECK`。零修改时写出本轮报告，并通过 `export --errors` 写出已验证的错误覆盖，返回 `REVIEW-REQUIRED`，清除 `.iteration_pending`，不推进 iteration。旧 iteration/target/scope/预检/术语指纹的 chunks 不可复用。
 

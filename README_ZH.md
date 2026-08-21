@@ -2,13 +2,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Agent Skill](https://img.shields.io/badge/Agent%20Skill-Codex-blue.svg)](SKILL.md)
-[![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 
 [English](README.md) | 中文
 
-用于游戏本地化 LQE：先做机器预检，再由专项检查模块报告问题和安全的局部修改，最后由 Python 校验、评分并生成 Excel 交付文件。
+用于游戏本地化 LQE：先做机器预检，再由专项检查模块报告问题和安全的局部修改，最后由 Python 校验、评分并生成对应格式的交付文件。
 
-> PM 操作手册不随运行时 Skill 分发，统一维护在 Langlobal 开发文档目录。
+> PM 的手动与 Agent 操作、验收和恢复流程见[项目经理操作手册](PM_GUIDE.html)。
 
 ## 核心约束
 
@@ -17,8 +17,8 @@
 - 模型只提交 `issues` 和安全的局部 `edit`；Python 校验后生成内部完整文本。
 - `confirmed: true` 表示该译法已经确认，可在证据唯一时安全修改；`protected: true` 表示不可修改。
 - 受保护段不修改、不计分。
-- SDLXLIFF 1.2 可直接读取单文件或递归目录，不需要先转换为工作簿。
-- 标准交付文件为 `<任务名>_lqe.xlsx` 和按输入格式确定扩展名的 corrected 文件：CSV/TSV 保持原扩展名，XLSX 与 SDLXLIFF 使用 `.xlsx`。
+- SDLXLIFF 1.2 与 XLIFF 2.0 可直接读取单文件或递归目录，不需要先转换为工作簿。
+- 标准交付文件为 `<任务名>_lqe.xlsx` 和按输入格式确定扩展名的 corrected 文件；XML 任务保留 XLSX 配套表，并额外写出 corrected SDLXLIFF/XLIFF XML。
 
 ## 目录结构
 
@@ -33,8 +33,10 @@ lqe-translator/
 │   ├── lqe_calc.py         # LQE 评分
 │   └── finalize_job.sh     # 从校验到导出的一键收尾
 ├── references/
-│   ├── suggestions.md
-│   └── check_modules/
+│   ├── suggestions_v2.md
+│   ├── suggestion_review_v2.md
+│   ├── corpus_ingest.md
+│   └── check_modules_v2/
 │       ├── common.md
 │       ├── terminology.md
 │       ├── precheck_review.md
@@ -56,7 +58,7 @@ lqe-translator/
     ├── state.json
     ├── scope.json
     ├── tabular_source_manifest.json # 表格任务
-    ├── source_manifest.json         # SDLXLIFF 任务
+    ├── source_manifest.json         # XML 任务
     ├── tm_candidates.json         # SDLXLIFF 任务
     ├── capability_resolution.json
     ├── project_asset_snapshot.json
@@ -75,13 +77,16 @@ lqe-translator/
     ├── suggestion_review.json
     ├── reference_suggestions.json
     ├── <任务名>_lqe.xlsx
-    └── <任务名>_corrected.<csv|tsv|xlsx>
+    ├── <任务名>_corrected.<csv|tsv|xlsx>
+    └── <任务名>_corrected.<sdlxliff|xliff|xlf> 或 <任务名>_corrected_xliff/
 ```
 
 ## 安装与路径
 
+需要 Python 3.12 或更高版本。
+
 ```bash
-pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q
+python3 -m pip install -r requirements.txt
 SCRIPTS=~/.codex/skills/lqe-translator/scripts
 ```
 
@@ -141,7 +146,7 @@ python3 "$SCRIPTS/lqe_io.py" read \
 
 解析后的模式写入 `state.check_scope`，并同步生成 `$JOB/scope.json`。无术语模式只关闭术语、专名和术语审计；不会关闭文件内一致性、Markup、数字等检查。
 
-SDLXLIFF 可传单个 `.sdlxliff` 文件或目录。`--input-format` 可取 `auto`、`tabular`、`sdlxliff`；单文件和只含 SDLXLIFF 的目录可自动识别，混合格式目录必须显式指定。SDLXLIFF 直接读取句段，不使用 `--source-col` 或 `--target-col`：
+XML 本地化输入可传单个 `.sdlxliff`、`.xliff`、`.xlf` 文件，或只包含一种受支持 XML 家族的目录。`--input-format` 可取 `auto`、`tabular`、`sdlxliff`、`xliff`；受支持的单文件和纯 XML 目录可自动识别，混合目录必须显式指定。XML 直接读取句段，不使用 `--source-col` 或 `--target-col`：
 
 ```bash
 python3 "$SCRIPTS/lqe_io.py" read \
@@ -151,7 +156,7 @@ python3 "$SCRIPTS/lqe_io.py" read \
   --out "$JOB/state.json"
 ```
 
-第一版只支持带 SDL namespace 的 XLIFF 1.2/SDLXLIFF 1.2；XLIFF 2.0 明确失败。未知厂商扩展若不影响句段边界会保留并记录，若造成 source、target 或 `mid` 配对歧义则失败。内容类型与排除只由 profile 显式规则决定，不根据 CC、FF、文件名或目录名推断。
+运行时支持 SDLXLIFF 1.2 与 XLIFF 2.0。XLIFF 2.0 省略根节点 `trgLang` 时，必须由项目 profile 或 `--target-lang` 明确提供目标语言；声明冲突会失败。未知厂商扩展若不影响句段边界会保留并记录，若造成 source、target 或 `mid` 配对歧义则失败。内容类型与排除只由 profile 显式规则决定，不根据 CC、FF、文件名或目录名推断。
 
 以下可见合同精确定义两种解析后 scope：
 
@@ -326,7 +331,7 @@ chunk_NN.naturalness.json
 
 `term_spans` 必须恰有 `source` 和 `target` 两个数组。每个 span 对象恰有整数 `start`、整数 `end` 和非空 `text`，使用 0-based、左闭右开的非空区间；数组按 `(start,end,text)` 升序排列，不得重复或重叠。`text` 必须严格等于原文或当前译文的对应切片，且每个 source span 的 `text` 必须等于 `term_source`。`source` 非空；漏译或没有可安全定位的译文问题词时，`target` 可为空，不得猜测或整句标记。复核机器预检 Terminology issue 时，`term_source`、`expected_targets` 和 `term_spans.source` 为只读并按 `precheck_ref` 继承；模型必须精确补充 `term_spans.target`，确实没有可标译文词时保留空数组。新发现的 Terminology issue 必须完整提交三个结构化字段。
 
-表格中的 `content_type`、`text_type`、`文本类型`、`文本类别` 会作为上游文本分类传入 review packet，不自行分类。`optimized` 优先使用行级 `content_type`，否则使用 `text_type_context`，并按 `references/check_modules/common.md` 的矩阵调整重点；`full` 只把分类作为上下文，不改变检查强度。两种模式都不关闭机器预检或必需模块。普通源文永远不会因为内容像“类型标题”而被跳过；只有 profile 的 `tabular.text_type_marker_rules` 显式声明的标记行才会被识别并审计。
+表格中的 `content_type`、`text_type`、`文本类型`、`文本类别` 会作为上游文本分类传入 review packet，不自行分类。`optimized` 优先使用行级 `content_type`，否则使用 `text_type_context`，并按 `references/check_modules_v2/common.md` 的矩阵调整重点；`full` 只把分类作为上下文，不改变检查强度。两种模式都不关闭机器预检或必需模块。普通源文永远不会因为内容像“类型标题”而被跳过；只有 profile 的 `tabular.text_type_marker_rules` 显式声明的标记行才会被识别并审计。
 
 新任务同时绑定稳定句段身份、来源证据以及项目资产/能力快照。输入含显式上下文时使用 `--sheet`、`--key-col` 和可重复的 `--context-col FIELD=COLUMN`；常用别名包括 `--content-type-col`、`--speaker-col`、`--addressee-col`。可选能力只有在 `enforce` 模式才进入正式 packet；`shadow` 写入独立 `shadow_context/context.json`，不进入正式去重、审校、建议或报告。旧 `.xls` 由 `xlrd>=2.0` 只读，corrected 固定输出 `.xlsx`。
 
@@ -405,7 +410,7 @@ python3 "$SCRIPTS/lqe_io.py" export \
 
 - CSV/TSV 输入输出 `<任务名>_corrected.csv` 或 `<任务名>_corrected.tsv`，保持原行列和输入扩展名。
 - XLSX 输入输出 `<任务名>_corrected.xlsx`，保持工作簿、工作表、空行、列顺序和格式。
-- SDLXLIFF 输出新建固定 5 列的 `<任务名>_corrected.xlsx`。
+- SDLXLIFF/XLIFF 输出固定 5 列的 `<任务名>_corrected.xlsx` 配套表，并生成 corrected XML：单文件为 `<任务名>_corrected.<sdlxliff|xliff|xlf>`，目录为 `<任务名>_corrected_xliff/`。
 
 报告保留 `说明·导读`、`LQA Scorecard` 和 `LQE Results` 三张可见工作表；`_LQE_CONTRACT` 保持 veryHidden。导读固定排在第一张并作为默认打开页，面向新人解释阅读流程、Scorecard、10 个审校列、建议状态、审校结论和交付检查。Scorecard 完整显示判定、分数、精简类别汇总和逐错误审校行，不隐藏行列。
 
@@ -417,9 +422,13 @@ Scorecard 的逐错误区域和 `LQE Results` 共用 10 列：Segment ID、原�
 
 经验证的内部结果中，`corrected: ""` 是合法的整段删除；只有 `corrected: null` 表示没有建议修改。write、apply、export 和聚合都必须保留这一区别。
 
-表格与 SDLXLIFF 报告使用相同的 10 列审校视图。来源文件、TU ID、SDL Segment ID、处理方式、逐错误 provenance、保护证据和 `LQE_Iter` 保留在隐藏审计区，`LQE_Iter` 固定为最后一列。`source_manifest.json` 保存输入 SHA-256、声明语言、扩展 namespace、规则命中、排除和 locked/TM 证据；`tm_candidates.json` 把严格候选与保护决定分开。新建的 corrected Excel 固定为 5 列：来源文件、TU ID、SDL Segment ID、原文、译文。
+表格与 XML 报告使用相同的 10 列审校视图。来源文件、TU/Unit ID、Segment ID、处理方式、逐错误 provenance、保护证据和 `LQE_Iter` 保留在隐藏审计区，`LQE_Iter` 固定为最后一列。`source_manifest.json` 保存输入 SHA-256、声明语言、扩展 namespace、规则命中、排除和 locked/TM 证据；`tm_candidates.json` 把 SDL 严格候选与保护决定分开。corrected Excel 配套表固定为 5 列：来源文件、TU/Unit ID、Segment ID、原文、译文。
 
-第一版不回写 SDLXLIFF XML；`export` 只生成 `<任务名>_corrected.xlsx`，所有原始 XML 保持不变。
+`export` 以事务方式写出 corrected XML，所有原始 XML 保持不变。corrected 混合内容格式错误、源文件漂移或发布失败时，不留下正式 corrected 产物。
+
+### Finalized 语料回流
+
+`ingest-corpus` 是显式外部写操作，只接受带 `.finalized` 标记的当前运行时任务。它按版本化 JSON 合同进行有界异步批量发布，可从环境变量读取 bearer 认证，并写入幂等回执。新端点应先用 `--dry-run --payload-out <路径>` 检查；完整合同见 [`references/corpus_ingest.md`](references/corpus_ingest.md)。
 
 ## 评分
 
