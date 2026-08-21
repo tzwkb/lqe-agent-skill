@@ -348,6 +348,12 @@ class SuggestionReviewCliE2ETests(unittest.TestCase):
         )
         self.assertIsNone(worker_manifest["budget"]["max_bytes"])
         self.assertEqual(worker_manifest["budget"]["status"], "advisory")
+        if generation_packet["instructions"].get("candidate_guard_version") == 2:
+            instruction_paths = {
+                worker_manifest["instructions"][key]["locator"]["path"]
+                for key in ("common", "module", "suggestions")
+            }
+            self.assertEqual(instruction_paths, {"references/suggestions_v2.md"})
         generation_measurement = json.loads(
             (self.job / "suggestion_context" / "input_measurement.json").read_text(
                 encoding="utf-8"

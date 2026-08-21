@@ -2330,6 +2330,11 @@ def _build_live_packet_context(
             bundle_set,
             max_worker_bytes=None,
             packet_payloads=[_worker_packet_basis(packet_basis)],
+            common_instructions_path=(
+                SUGGESTION_V2_INSTRUCTIONS_PATH
+                if _suggestion_guard_version(state) >= 2
+                else None
+            ),
             suggestion_instructions_path=(
                 SUGGESTION_V2_INSTRUCTIONS_PATH
                 if _suggestion_guard_version(state) >= 2
