@@ -63,6 +63,15 @@ PROFILE_EXPECTATIONS = {
     },
 }
 FOUNDATIONS = {"context.core@1", "source_provenance@1"}
+PUBLIC_CHECKOUT_PRIVATE_ASSETS = {
+    "mhg/zh-ko": {
+        "entities",
+        "context_rules",
+        "project_sources",
+        "shadow_readme",
+        "review_examples",
+    }
+}
 
 
 def profile_path(profile_name: str) -> Path:
@@ -72,6 +81,16 @@ def profile_path(profile_name: str) -> Path:
 def load_profile(profile_name: str) -> tuple[Path, dict]:
     path = profile_path(profile_name)
     return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+def missing_included_assets(profile_name: str, profile: dict) -> set[str]:
+    profile_dir = profile_path(profile_name).parent
+    return {
+        asset_id
+        for asset_id, declaration in profile["assets"].items()
+        if declaration["availability"] == "included"
+        and not (profile_dir / declaration["path"]).is_file()
+    }
 
 
 def runtime(profile_name: str) -> tuple[dict, dict, dict]:
@@ -151,7 +170,17 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
         for profile_name in PROFILE_EXPECTATIONS:
             with self.subTest(profile=profile_name):
                 path, raw = load_profile(profile_name)
-                normalized, inspection, _ = runtime(profile_name)
+                missing = missing_included_assets(profile_name, raw)
+                allowed_missing = PUBLIC_CHECKOUT_PRIVATE_ASSETS.get(
+                    profile_name, set()
+                )
+                self.assertFalse(missing - allowed_missing)
+                normalized = normalize_profile(raw)
+                inspection = inspect_project_assets(
+                    normalized,
+                    profile_dir=path.parent,
+                    strict_required=not missing,
+                )
                 snapshot = validate_project_asset_snapshot(inspection["snapshot"])
 
                 self.assertEqual(set(snapshot["assets"]), set(raw["assets"]))
@@ -165,6 +194,15 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                         self.assertNotIn(asset_id, inspection["resolved_paths"])
                         continue
                     expected_path = (path.parent / declaration["path"]).resolve()
+                    if asset_id in missing:
+                        self.assertEqual(declaration["distribution"], "internal_only")
+                        self.assertEqual(
+                            Path(declaration["path"]).parts[0], "sources"
+                        )
+                        self.assertEqual(entry["status"], "missing")
+                        self.assertIsNone(entry["sha256"])
+                        self.assertNotIn(asset_id, inspection["resolved_paths"])
+                        continue
                     self.assertTrue(expected_path.is_file())
                     self.assertEqual(entry["status"], "present")
                     self.assertEqual(
@@ -260,6 +298,16 @@ class LegacyProfilesV2RuntimeTests(unittest.TestCase):
                     )
 
     def test_mhg_enforce_mode_binds_v2_register_and_context_assets(self):
+        _, raw = load_profile("mhg/zh-ko")
+        missing = missing_included_assets("mhg/zh-ko", raw)
+        self.assertFalse(
+            missing - PUBLIC_CHECKOUT_PRIVATE_ASSETS["mhg/zh-ko"]
+        )
+        if missing:
+            self.skipTest(
+                "MHG internal-only runtime assets are not distributed in the "
+                "public checkout"
+            )
         normalized, inspection, resolution = runtime("mhg/zh-ko")
         repeated = resolve_capabilities(
             normalized,

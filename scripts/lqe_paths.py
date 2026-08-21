@@ -121,11 +121,27 @@ def _replace_staged(source: Path, destination: Path) -> None:
     if identity is None:
         raise FileNotFoundError(f"staged artifact is missing: {source}")
     if os.path.lexists(destination):
-        os.replace(source, destination)
+        descriptor, swap_value = tempfile.mkstemp(
+            dir=destination.parent,
+            prefix=f".{destination.name}.publish.",
+            suffix=".tmp",
+        )
+        os.close(descriptor)
+        swap = Path(swap_value)
+        swap.unlink()
+        try:
+            os.link(source, swap, follow_symlinks=False)
+            if _file_identity(swap) != identity:
+                raise RuntimeError(
+                    f"staged publish link identity mismatch: {destination}"
+                )
+            os.replace(swap, destination)
+        except BaseException:
+            _unlink_if_owned(swap, identity)
+            raise
         return
     try:
         os.link(source, destination, follow_symlinks=False)
-        source.unlink()
     except BaseException:
         _unlink_if_owned(destination, identity)
         raise
@@ -139,7 +155,6 @@ def _publish_new_staged(source: Path, destination: Path) -> None:
         raise FileNotFoundError(f"staged artifact is missing: {source}")
     try:
         os.link(source, destination, follow_symlinks=False)
-        source.unlink()
     except BaseException:
         _unlink_if_owned(destination, identity)
         raise
@@ -195,6 +210,7 @@ def publish_replacement_transaction(
 
     backups: dict[Path, Path] = {}
     published: dict[Path, tuple[int, int]] = {}
+    staged_identities: dict[Path, tuple[int, int]] = {}
     try:
         for _, destination in normalized:
             if overwrite and os.path.lexists(destination):
@@ -204,6 +220,7 @@ def publish_replacement_transaction(
             identity = _file_identity(source)
             if identity is None:
                 raise FileNotFoundError(f"staged artifact is missing: {source}")
+            staged_identities[source] = identity
             published[destination] = identity
             if overwrite:
                 _replace_staged(source, destination)
@@ -221,6 +238,11 @@ def publish_replacement_transaction(
             else:
                 os.replace(backup, destination)
         raise
+    else:
+        # Keep the staged hard link alive until every destination commits. This
+        # prevents inode reuse from making a competing replacement look owned.
+        for source, identity in staged_identities.items():
+            _unlink_if_owned(source, identity)
     finally:
         for backup in backups.values():
             backup.unlink(missing_ok=True)
