@@ -758,6 +758,77 @@ def apply_segment_context_overrides(
     return output
 
 
+def validate_project_profile(
+    value: object,
+    *,
+    profile_path: str | Path,
+    target_lang: str | None = None,
+) -> dict:
+    if not isinstance(value, dict):
+        raise ProfileIngestError("project profile must be an object")
+    required = ("language_pair", "source_lang", "target_lang")
+    missing = [
+        field
+        for field in required
+        if not isinstance(value.get(field), str) or not value[field].strip()
+    ]
+    if missing:
+        raise ProfileIngestError(
+            "project profile must define language_pair, source_lang, and "
+            f"target_lang; missing: {', '.join(missing)}"
+        )
+    if target_lang is not None and value["target_lang"] != target_lang:
+        raise ProfileIngestError(
+            "project profile target_lang does not match --target-lang: "
+            f"{value['target_lang']!r} != {target_lang!r}"
+        )
+    protected_statuses = value.get("protected_term_statuses")
+    if "protected_term_statuses" in value and (
+        not isinstance(protected_statuses, list)
+        or any(
+            not isinstance(item, str) or not item.strip()
+            for item in protected_statuses
+        )
+    ):
+        raise ProfileIngestError(
+            "project profile protected_term_statuses must be an array of "
+            "non-empty strings"
+        )
+    if "scoring_policy" in value and not isinstance(
+        value["scoring_policy"], dict
+    ):
+        raise ProfileIngestError("project profile scoring_policy must be an object")
+
+    try:
+        from lqe_capabilities import (
+            normalize_profile,
+            resolve_capabilities,
+        )
+        from lqe_language_policies import trusted_provider_registry
+        from lqe_project_assets import asset_statuses, inspect_project_assets
+
+        normalized = normalize_profile(value)
+        inspection = inspect_project_assets(
+            normalized,
+            profile_dir=Path(profile_path).resolve().parent,
+            allow_outside_root=normalized.get("legacy_adapter", False),
+            strict_required=True,
+        )
+        resolution = resolve_capabilities(
+            normalized,
+            asset_statuses=asset_statuses(inspection["snapshot"]),
+            provider_registry=trusted_provider_registry(),
+        )
+    except ValueError as exc:
+        raise ProfileIngestError(str(exc)) from exc
+    return {
+        "profile": normalized,
+        "asset_inspection": inspection,
+        "asset_snapshot": inspection["snapshot"],
+        "capability_resolution": resolution,
+    }
+
+
 def validate_canonical_asset(
     value: object,
     *,
@@ -830,7 +901,9 @@ def _mapping_from_file(path: str | Path, label: str) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    validate = subparsers.add_parser("validate", help="validate one canonical asset")
+    validate = subparsers.add_parser(
+        "validate", help="validate one project profile or canonical asset"
+    )
     validate.add_argument("input")
     validate.add_argument("--schema", choices=sorted(SCHEMA_FILES))
     validate.add_argument("--target-lang")
@@ -859,17 +932,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "validate":
-            document = validate_canonical_asset(
-                _load_json(args.input),
-                expected_schema=args.schema,
-                target_lang=args.target_lang,
-            )
-            result = {
-                "status": "valid",
-                "schema": document["schema"],
-                "version": document["version"],
-                "digest": canonical_digest(document),
-            }
+            raw = _load_json(args.input)
+            is_asset = isinstance(raw, dict) and raw.get("schema") in SCHEMA_FILES
+            if args.schema is not None or is_asset:
+                document = validate_canonical_asset(
+                    raw,
+                    expected_schema=args.schema,
+                    target_lang=args.target_lang,
+                )
+                result = {
+                    "status": "valid",
+                    "kind": "canonical_asset",
+                    "schema": document["schema"],
+                    "version": document["version"],
+                    "digest": canonical_digest(document),
+                }
+            else:
+                validated = validate_project_profile(
+                    raw,
+                    profile_path=args.input,
+                    target_lang=args.target_lang,
+                )
+                normalized = validated["profile"]
+                result = {
+                    "status": "valid",
+                    "kind": "project_profile",
+                    "name": normalized["name"],
+                    "schema": normalized["normalized_profile_schema"],
+                    "version": normalized["normalized_profile_version"],
+                    "digest": normalized["source_profile_digest"],
+                    "assets": len(
+                        validated["asset_snapshot"].get("assets", {})
+                    ),
+                    "capabilities": len(
+                        validated["capability_resolution"].get("enabled", {})
+                    ),
+                }
         elif args.command == "manifest":
             details = _load_json(args.coverage_details)
             document = build_project_source_manifest(
@@ -926,6 +1024,7 @@ __all__ = [
     "file_sha256",
     "load_project_source_manifest",
     "load_schema",
+    "validate_project_profile",
     "segment_context_override_digest",
     "source_digest",
     "validate_canonical_asset",

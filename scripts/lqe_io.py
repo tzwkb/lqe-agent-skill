@@ -2,12 +2,13 @@
 LQE I/O utilities.
 
 Subcommands:
-  read          Excel/CSV/TSV + project profile → state.json
+  read          Excel/CSV/TSV/SDLXLIFF/XLIFF + project profile → state.json
   pre-check     确定性错误自动检测（标点/Markup/术语/长度等）
   protect-segments 把已确认的 TM/100% 匹配段标记为已保护
   apply-fixes   把程序生成的建议译文写回 state.json
   write         state.json + errors.json → *_lqe.xlsx
-  ingest-corpus 建议译文回传 AIPE 语料库（接口尚未确定，暂不执行）
+  export        事务式导出 corrected 表格及 XML
+  ingest-corpus 按版本化合同回传已定稿语料并写入幂等回执
 """
 import argparse
 import csv
@@ -62,6 +63,7 @@ from lqe_inputs import (
     XLSImportError,
     detect_input_format,
     read_sdlxliff,
+    render_xliff_writeback,
     read_xls,
 )
 from lqe_inputs.xls import workbook_for_corrected_export
@@ -134,9 +136,11 @@ from lqe_language_policies import (
     trusted_provider_registry,
 )
 from lqe_profile_ingest import (
+    ProfileIngestError,
     apply_segment_context_overrides,
     load_project_source_manifest,
     validate_context_rules,
+    validate_project_profile,
 )
 from lqe_shadow import build_shadow_context_artifact
 from lqe_context_overrides import (
@@ -298,53 +302,17 @@ def _load_profile_overlay(path: str, base: dict) -> dict:
 
 
 def _validate_project_profile(prof: dict):
-    required = ("language_pair", "source_lang", "target_lang")
-    missing = [k for k in required if not str(prof.get(k, "")).strip()]
-    if missing:
-        print("[ERROR] project profile must define language_pair, source_lang, and target_lang; "
-              f"missing: {', '.join(missing)}", file=sys.stderr)
-        sys.exit(1)
-    protected_statuses = prof.get("protected_term_statuses")
-    if "protected_term_statuses" in prof and (
-        not isinstance(protected_statuses, list)
-        or any(
-            not isinstance(value, str) or not value.strip()
-            for value in protected_statuses
-        )
-    ):
-        print(
-            "[ERROR] project profile protected_term_statuses must be an "
-            "array of non-empty strings",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    if "scoring_policy" in prof and not isinstance(
-        prof["scoring_policy"], dict
-    ):
-        print(
-            "[ERROR] project profile scoring_policy must be an object",
-            file=sys.stderr,
-        )
-        sys.exit(1)
     try:
-        normalized = normalize_profile(prof)
-        inspection = inspect_project_assets(
-            normalized,
-            profile_dir=Path(prof["_dir"]),
-            allow_outside_root=normalized.get("legacy_adapter", False),
-            strict_required=True,
+        validated = validate_project_profile(
+            prof,
+            profile_path=prof["_path"],
         )
-        resolution = resolve_capabilities(
-            normalized,
-            asset_statuses=asset_statuses(inspection["snapshot"]),
-            provider_registry=trusted_provider_registry(),
-        )
-    except ValueError as exc:
+    except (ProfileIngestError, ValueError) as exc:
         print(f"[ERROR] project profile contract: {exc}", file=sys.stderr)
         sys.exit(1)
-    prof["_normalized_profile"] = normalized
-    prof["_asset_inspection"] = inspection
-    prof["_capability_resolution"] = resolution
+    prof["_normalized_profile"] = validated["profile"]
+    prof["_asset_inspection"] = validated["asset_inspection"]
+    prof["_capability_resolution"] = validated["capability_resolution"]
 
 
 def _project_path(prof: dict, val: str) -> str:
@@ -1921,25 +1889,7 @@ def _language_values_match(first: str, second: str) -> bool:
 def _validate_sdlxliff_languages(result, args, prof: dict | None) -> tuple[str, str]:
     declarations = result.manifest.get("languages", [])
     if not declarations:
-        raise SDLXLIFFImportError("SDLXLIFF input has no language declarations")
-    normalized = []
-    for index, declaration in enumerate(declarations):
-        source = normalize_language_tag(declaration.get("source_language"))
-        target = normalize_language_tag(declaration.get("target_language"))
-        if not source or not target:
-            raise SDLXLIFFImportError(
-                f"language declaration {index} must include source-language and target-language"
-            )
-        normalized.append((source, target))
-    expected_source, expected_target = normalized[0]
-    for index, (source, target) in enumerate(normalized[1:], start=1):
-        if source != expected_source or target != expected_target:
-            raise SDLXLIFFImportError(
-                "conflicting SDLXLIFF language declarations: "
-                f"declaration 0={expected_source}->{expected_target}, "
-                f"declaration {index}={source}->{target}"
-            )
-
+        raise SDLXLIFFImportError("XML input has no language declarations")
     profile_source = normalize_language_tag(prof.get("source_lang")) if prof else ""
     profile_target = normalize_language_tag(prof.get("target_lang")) if prof else ""
     cli_source = normalize_language_tag(getattr(args, "source_lang", None))
@@ -1954,6 +1904,42 @@ def _validate_sdlxliff_languages(result, args, prof: dict | None) -> tuple[str, 
             raise SDLXLIFFImportError(
                 f"profile and CLI {label} language conflict: "
                 f"{profile_value!r} != {cli_value!r}"
+            )
+
+    allow_inferred_target = result.manifest.get("input_format") == "xliff"
+    normalized = []
+    for index, declaration in enumerate(declarations):
+        source = normalize_language_tag(declaration.get("source_language"))
+        target = normalize_language_tag(declaration.get("target_language"))
+        if not source:
+            raise SDLXLIFFImportError(
+                f"language declaration {index} must include a source language"
+            )
+        if not target and not allow_inferred_target:
+            raise SDLXLIFFImportError(
+                f"language declaration {index} must include a target language"
+            )
+        normalized.append((source, target))
+
+    expected_source = normalized[0][0]
+    declared_targets = [target for _, target in normalized if target]
+    expected_target = (
+        declared_targets[0]
+        if declared_targets
+        else profile_target or cli_target
+    )
+    if not expected_target:
+        raise SDLXLIFFImportError(
+            "XLIFF 2.0 input without trgLang requires profile or CLI target language"
+        )
+    for index, (source, target) in enumerate(normalized[1:], start=1):
+        if source != expected_source or (
+            target and target != expected_target
+        ):
+            raise SDLXLIFFImportError(
+                "conflicting XML language declarations: "
+                f"declaration 0={expected_source}->{expected_target}, "
+                f"declaration {index}={source}->{target or expected_target}"
             )
 
     for origin, source, target in (
@@ -2132,8 +2118,12 @@ def _read_sdlxliff_job(
         segment.update(identity)
         segment["source_digest"] = source_digest(segment.get("source", ""))
         segment["input_status"] = "ready"
+        importer = result.manifest.get("importer") or {}
         segment["source_provenance"] = {
-            "adapter": "sdlxliff@1",
+            "adapter": (
+                f"{importer.get('name', 'sdlxliff')}@"
+                f"{importer.get('version', 1)}"
+            ),
             "source_ref": deepcopy(source_ref),
         }
         segment["iter"] = 0
@@ -2275,6 +2265,9 @@ def _read_sdlxliff_job(
         state = {
             "artifact_contract_version": 1,
             "input_format": "sdlxliff",
+            "xml_input_format": result.manifest.get(
+                "input_format", "sdlxliff"
+            ),
             "input_path": str(Path(args.input).resolve()),
             "input_paths": result.input_paths,
             "source_manifest_path": str(manifest_path),
@@ -4411,15 +4404,22 @@ def _segment_filename(state: dict, segment: dict, source_row=None) -> str:
 def _report_source_table(state: dict) -> tuple[list[str], list[list[object]]]:
     segments = state.get("segments") or []
     if state.get("input_format") == "sdlxliff":
-        headers = ["来源文件", "TU ID", "SDL Segment ID", "原文", "译文"]
+        is_xliff2 = state.get("xml_input_format") == "xliff"
+        headers = (
+            ["来源文件", "Unit ID", "Segment ID", "原文", "译文"]
+            if is_xliff2
+            else ["来源文件", "TU ID", "SDL Segment ID", "原文", "译文"]
+        )
         rows = []
         for segment in segments:
             source_ref = segment.get("source_ref") or {}
             rows.append(
                 [
                     _segment_filename(state, segment),
-                    source_ref.get("tu_id") or "",
-                    source_ref.get("sdl_segment_id") or "",
+                    source_ref.get("unit_id", source_ref.get("tu_id")) or "",
+                    source_ref.get(
+                        "segment_id", source_ref.get("sdl_segment_id")
+                    ) or "",
                     segment.get("source", ""),
                     segment.get("target", ""),
                 ]
@@ -6050,7 +6050,8 @@ def _validate_sdl_source_snapshot(state: dict) -> dict[Path, str]:
             (
                 path
                 for path in input_root.rglob("*")
-                if path.is_file() and path.suffix.casefold() == ".sdlxliff"
+                if path.is_file()
+                and path.suffix.casefold() in {".sdlxliff", ".xliff", ".xlf"}
             ),
             key=lambda path: path.relative_to(input_root).as_posix(),
         )
@@ -6236,37 +6237,91 @@ def _cmd_export_locked(
     if state.get("input_format") == "sdlxliff":
         for segment in segments:
             counts[export_kind(segment)] += 1
-        out_path = state_path.parent / (
+        xlsx_out_path = state_path.parent / (
             _job_label(state_path) + "_corrected.xlsx"
         )
-        staged = None
+        input_root = Path(state["input_path"])
+        xml_root = state_path.parent / (
+            _job_label(state_path) + "_corrected_xliff"
+        )
+        corrections = {
+            segment["id"]: result_entries[segment["id"]]["corrected"]
+            for segment in segments
+            if not segment.get("protected")
+            and segment.get("input_status") != "blocked"
+            and result_entries[segment["id"]].get("corrected") is not None
+        }
+        created_destination_directories: list[Path] = []
         try:
             _validate_export_paths(
-                state_path, state, out_path, errors_path
+                state_path, state, xlsx_out_path, errors_path
             )
             source_snapshot = _validate_sdl_source_snapshot(state)
-            with tempfile.NamedTemporaryFile(
-                dir=out_path.parent,
-                prefix=f".{out_path.stem}.",
-                suffix=out_path.suffix,
-                delete=False,
-            ) as handle:
-                staged = Path(handle.name)
-            _export_sdlxliff_xlsx(
-                state_path,
-                state,
-                result_entries,
-                out_path=staged,
+            rendered_xml = render_xliff_writeback(
+                input_root,
+                segments=segments,
+                corrections=corrections,
             )
-            _recheck_sdl_source_snapshot(state, source_snapshot)
-            revalidate_inputs()
-            publish_replacement_transaction([(staged, out_path)])
-        except (OSError, ValueError) as exc:
+            with tempfile.TemporaryDirectory(
+                dir=state_path.parent,
+                prefix=f".{_job_label(state_path)}.xml-export.",
+            ) as staging_value:
+                staging_root = Path(staging_value)
+                staged_xlsx = staging_root / xlsx_out_path.name
+                _export_sdlxliff_xlsx(
+                    state_path,
+                    state,
+                    result_entries,
+                    out_path=staged_xlsx,
+                )
+                replacements = [(staged_xlsx, xlsx_out_path)]
+                xml_destinations = []
+                for relative_path, payload in rendered_xml:
+                    destination = (
+                        state_path.parent
+                        / (
+                            _job_label(state_path)
+                            + "_corrected"
+                            + input_root.suffix.casefold()
+                        )
+                        if input_root.is_file()
+                        else xml_root / relative_path
+                    )
+                    _validate_export_paths(
+                        state_path, state, destination, errors_path
+                    )
+                    staged_xml = staging_root / "xml" / relative_path
+                    staged_xml.parent.mkdir(parents=True, exist_ok=True)
+                    staged_xml.write_bytes(payload)
+                    replacements.append((staged_xml, destination))
+                    xml_destinations.append(destination)
+                _recheck_sdl_source_snapshot(state, source_snapshot)
+                revalidate_inputs()
+                for _, destination in replacements:
+                    missing = []
+                    parent = destination.parent
+                    while not parent.exists():
+                        missing.append(parent)
+                        parent = parent.parent
+                    for directory in reversed(missing):
+                        try:
+                            directory.mkdir()
+                        except FileExistsError:
+                            if not directory.is_dir():
+                                raise
+                        else:
+                            created_destination_directories.append(directory)
+                publish_replacement_transaction(replacements)
+        except (OSError, ValueError, RuntimeError) as exc:
+            for directory in reversed(created_destination_directories):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
             raise SystemExit(f"[export] {exc}") from exc
-        finally:
-            if staged is not None:
-                staged.unlink(missing_ok=True)
-        print_summary(out_path)
+        print_summary(xlsx_out_path)
+        for destination in xml_destinations:
+            print(f"[export] XML writeback → {destination}")
         return
 
     try:
@@ -6488,11 +6543,26 @@ def cmd_export(args):
         raise SystemExit(f"[export] {exc}") from exc
 
 
-# ── ingest-corpus (stub) ──────────────────────────────────────────────────────
-
 def cmd_ingest_corpus(args):
-    # TODO: 接口格式待确认（JSON 直传 vs 文件上传）
-    print("[lqe_io] ingest-corpus: AIPE RAG ingest interface TBD, skipping.")
+    from lqe_corpus_ingest import CorpusIngestError, ingest_corpus
+
+    try:
+        result = ingest_corpus(
+            state_path=Path(args.state),
+            endpoint=args.aipe_url,
+            auth_env=args.auth_env,
+            batch_size=args.batch_size,
+            concurrency=args.concurrency,
+            timeout=args.timeout,
+            retries=args.retries,
+            changed_only=args.changed_only,
+            dry_run=args.dry_run,
+            payload_out=(Path(args.payload_out) if args.payload_out else None),
+            receipt_path=(Path(args.receipt) if args.receipt else None),
+        )
+    except (CorpusIngestError, OSError, ValueError) as exc:
+        raise SystemExit(f"[ingest-corpus] {exc}") from exc
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -6537,7 +6607,7 @@ def main():
     r.add_argument("--input", required=True)
     r.add_argument(
         "--input-format",
-        choices=["auto", "tabular", "sdlxliff"],
+        choices=["auto", "tabular", "sdlxliff", "xliff"],
         default="auto",
         dest="input_format",
     )
@@ -6662,6 +6732,15 @@ def main():
     ic = sub.add_parser("ingest-corpus")
     ic.add_argument("--state",    required=True)
     ic.add_argument("--aipe-url", required=True, dest="aipe_url")
+    ic.add_argument("--auth-env", default=None, dest="auth_env")
+    ic.add_argument("--batch-size", type=int, default=500, dest="batch_size")
+    ic.add_argument("--concurrency", type=int, default=4)
+    ic.add_argument("--timeout", type=float, default=30.0)
+    ic.add_argument("--retries", type=int, default=2)
+    ic.add_argument("--changed-only", action="store_true", dest="changed_only")
+    ic.add_argument("--dry-run", action="store_true", dest="dry_run")
+    ic.add_argument("--payload-out", default=None, dest="payload_out")
+    ic.add_argument("--receipt", default=None)
 
     args = p.parse_args()
     {

@@ -520,7 +520,7 @@ class SDLXLIFFParserTests(unittest.TestCase):
 
         self.assertEqual(serialized.plain, "甲乙丙丁戊")
 
-    def test_xliff2_and_ambiguous_mid_fail_with_file_context(self):
+    def test_malformed_xliff2_and_ambiguous_mid_fail_with_file_context(self):
         xliff2 = self.temp_fixture(
             "xliff2.xlf",
             self.document(
@@ -538,7 +538,7 @@ class SDLXLIFFParserTests(unittest.TestCase):
             ),
         )
 
-        for fixture, message in ((xliff2, "XLIFF 1.2"), (bad_mid, "mid")):
+        for fixture, message in ((xliff2, "unit"), (bad_mid, "mid")):
             with self.subTest(fixture=fixture.name):
                 with self.assertRaisesRegex(SDLXLIFFImportError, message) as caught:
                     read_sdlxliff(fixture, options=SDLXLIFFOptions())
@@ -2431,7 +2431,7 @@ class SDLXLIFFOutputTests(unittest.TestCase):
             lqe_io._segment_filename(state, segment), "nested/source.sdlxliff"
         )
 
-    def test_export_creates_corrected_xlsx_without_touching_xml(self):
+    def test_export_creates_corrected_xlsx_and_xml_without_touching_source(self):
         state_path = self.read_job()
         state = read_json(state_path)
         state.pop("artifact_contract_version", None)
@@ -2488,6 +2488,16 @@ class SDLXLIFFOutputTests(unittest.TestCase):
             self.assertEqual(rows[2][4], "Begin")
         finally:
             workbook.close()
+        xml_output = next(self.job.glob("*_corrected.sdlxliff"))
+        xml_root = ET.parse(xml_output).getroot()
+        translated = {
+            unit.get("id"): "".join(
+                unit.find(f"{XLIFF_QNAME}target").itertext()
+            )
+            for unit in xml_root.iter(f"{XLIFF_QNAME}trans-unit")
+        }
+        self.assertIn("Begin", translated["tu-2"])
+        self.assertIn("Second", translated["tu-1"])
         self.assertEqual(before, {path: self.sha256(path) for path in self.input_files})
 
     def test_export_rejects_sdl_source_drift(self):
@@ -2499,6 +2509,7 @@ class SDLXLIFFOutputTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("source changed after read", result.stderr)
         self.assertFalse(list(self.job.glob("*_corrected.xlsx")))
+        self.assertFalse(list(self.job.glob("*_corrected.sdlxliff")))
 
     def test_export_rejects_new_sdl_file_added_during_export(self):
         source_dir = self.root / "source-dir"
@@ -2528,6 +2539,32 @@ class SDLXLIFFOutputTests(unittest.TestCase):
                 )
 
         self.assertFalse(list(self.job.glob("*_corrected.xlsx")))
+        self.assertFalse(list(self.job.glob("*_corrected_xliff")))
+
+    def test_export_publish_failure_removes_created_xml_directories(self):
+        source_dir = self.root / "source-dir"
+        source_dir.mkdir()
+        shutil.copy2(self.source, source_dir / "original.sdlxliff")
+        state_path = self.job / "state.json"
+        read_result = self.run_io(
+            "read", "--input", source_dir, "--out", state_path
+        )
+        self.assertEqual(read_result.returncode, 0, read_result.stderr)
+
+        with mock.patch.object(
+            lqe_io,
+            "publish_replacement_transaction",
+            side_effect=RuntimeError("simulated publication failure"),
+        ):
+            with self.assertRaisesRegex(
+                SystemExit, "simulated publication failure"
+            ):
+                lqe_io.cmd_export(
+                    SimpleNamespace(state=str(state_path), errors=None)
+                )
+
+        self.assertFalse(list(self.job.glob("*_corrected.xlsx")))
+        self.assertFalse(list(self.job.glob("*_corrected_xliff")))
 
     def test_apply_fixes_preserves_source_locked_reason_and_evidence(self):
         state_path = self.read_job()

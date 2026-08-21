@@ -52,11 +52,11 @@ footer{margin-top:56px;text-align:center;color:#99a;font-size:12px}
 </header>
 
 <h2 id="prepare">一、用途与准备</h2>
-<p>LQE Translator 是 Codex 中的译文质检 skill。它先运行机器预检，再按当前检查模式运行专项模块；脚本校验局部修改、计算 LQE 分数并生成 Excel 交付文件。</p>
+<p>LQE Translator 是 Codex 中的译文质检 skill。它先运行机器预检，再按当前检查模式运行专项模块；脚本校验局部修改、计算 LQE 分数，并生成 Excel 与对应格式的 corrected 交付文件。</p>
 <table>
-<tr><th width="120">必需</th><td>Excel、CSV、TSV，或单个/目录形式的 SDLXLIFF 1.2；表格需明确原文列和译文列；两类输入都需项目语言轨，例如 <code>nrc/zh-th</code></td></tr>
+<tr><th width="120">必需</th><td>Excel、CSV、TSV，或单个/目录形式的 SDLXLIFF 1.2、XLIFF 2.0；表格需明确原文列和译文列；两类输入都需项目语言轨，例如 <code>nrc/zh-th</code></td></tr>
 <tr><th>项目资料</th><td><code>profile.json</code>、<code>confirmed_rules.md</code>、风格指南和目标语言说明；标准模式还使用术语表</td></tr>
-<tr><th>运行环境</th><td>macOS 或 Linux shell、Python 3；首次安装 <code>openpyxl&gt;=3.1 regex requests python-docx</code></td></tr>
+<tr><th>运行环境</th><td>macOS 或 Linux shell、Python 3.12 或更高版本；首次按仓库中的 <code>requirements.txt</code> 安装依赖</td></tr>
 <tr><th>运行选择</th><td>默认首轮检查；只有明确要求时才启用自动迭代</td></tr>
 </table>
 <div class="callout"><b>两种保护：</b>术语条目的 <code>protected: true</code> 表示不可修改；有明确 TM 精确匹配证据的段也可标记为受保护。受保护内容不修改、不计分。</div>
@@ -64,7 +64,7 @@ footer{margin-top:56px;text-align:center;color:#99a;font-size:12px}
 <h2 id="manual">二、手动启动与运行</h2>
 <p>在 skill 根目录运行。默认安装位置为 <code>~/.codex/skills/lqe-translator</code>：</p>
 <p class="prompt">cd ~/.codex/skills/lqe-translator
-pip install "openpyxl&gt;=3.1" regex requests python-docx -q
+python3 -m pip install -r requirements.txt
 SCRIPTS="$PWD/scripts"
 JOB="$PWD/jobs/&lt;任务名&gt;"</p>
 <p>用项目档案初始化，并把机器预检结果单独写入 <code>errors_precheck.json</code>：</p>
@@ -77,13 +77,16 @@ python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" \
   --errors "$JOB/errors_precheck.json" \
   --outdir "$JOB/chunks" --size 100</p>
 <div class="callout"><b>不检查术语：</b>在 <code>read</code> 命令的 <code>--out</code> 前加入 <code>--no-terminology</code>。它会覆盖 profile 术语配置，且不能与显式 <code>--terminology &lt;file&gt;</code> 同时使用。模式写入 <code>state.check_scope</code> 和 <code>scope.json</code>。该模式只关闭术语、专名和术语审计；不会关闭文件内一致性、Markup、数字等检查。</div>
-<p>SDLXLIFF 可直接传单个文件或目录，不需要原文列、译文列：</p>
+<p>SDLXLIFF 1.2 或 XLIFF 2.0 可直接传单个文件或目录，不需要原文列、译文列：</p>
 <p class="prompt">python3 "$SCRIPTS/lqe_io.py" read --project "&lt;game/source-target&gt;" \
   --input "&lt;SDLXLIFF 文件或目录&gt;" --input-format sdlxliff \
+  --out "$JOB/state.json"
+python3 "$SCRIPTS/lqe_io.py" read --project "&lt;game/source-target&gt;" \
+  --input "&lt;XLIFF 2.0 文件或目录&gt;" --input-format xliff \
   --out "$JOB/state.json"</p>
 <div class="callout"><b>SDLXLIFF 保护：</b>locked 段自动以 <code>SOURCE_LOCKED</code> 保护。默认只把严格满足 <code>origin=tm</code>、<code>percent=100</code>、<code>text-match=SourceAndTarget</code> 的段写入 <code>tm_candidates.json</code>，不会自动保护；确认后使用 <code>protect-segments</code>。只有明确决定自动保护时才使用 <code>--protect-exact-tm</code> 或 profile 的 <code>protect-exact-source-and-target</code>。</div>
-<p><code>--input-format</code> 可取 <code>auto</code>、<code>tabular</code>、<code>sdlxliff</code>。单文件和只含 SDLXLIFF 的目录可自动识别；混合目录必须显式指定。内容类型和排除只按 profile 的 <code>sdlxliff.content_type_rules</code>、<code>sdlxliff.exclude_rules</code> 执行，不根据 CC、FF、文件名或目录名推断。</p>
-<p>第一版只处理带 SDL namespace 的 XLIFF 1.2；XLIFF 2.0 明确失败。未知厂商扩展若不影响句段边界会保留并记录，若造成 source、target 或 mid 配对歧义则失败。</p>
+<p><code>--input-format</code> 可取 <code>auto</code>、<code>tabular</code>、<code>sdlxliff</code>、<code>xliff</code>。受支持的单文件和纯 XML 目录可自动识别；同时含表格与 XML 的目录必须显式指定 XML 格式，混合两个 XML 版本的目录必须拆分。内容类型和排除只按 profile 的明确规则执行，不根据 CC、FF、文件名或目录名自行推断。</p>
+<p>XLIFF 2.0 省略根节点 <code>trgLang</code> 时，必须由项目档案或 <code>--target-lang</code> 明确提供目标语言。未知厂商扩展若不影响句段边界会保留并记录；若造成 source、target、TU/Unit 或 Segment 配对歧义，则初始化失败并报告具体来源。</p>
 <p>以下可见合同精确定义两种解析后 scope：</p>
 <pre class="prompt" data-lqe-scope-contract>
 {
@@ -131,7 +134,7 @@ python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" \
 检查子任务顶层只提交 {id, issues}；无法安全局部修改的项设置 needs_confirmation: true、edit: null；完整建议译文由程序生成。
 完成后给出段数、固定词数、分数、问题数、保护数，以及 *_lqe.xlsx 和对应 corrected 文件的绝对路径；任何校验失败都要原样报告。</p>
 <p>不检查术语时，把提示词中的资料要求改为“不读取或使用术语表，并在初始化时使用 <code>--no-terminology</code>；按 <code>precheck_review</code>、accuracy、grammar、naturalness 四模块执行，仍检查一致性、Markup 和数字”。</p>
-<p>输入为 SDLXLIFF 时，把原文列、译文列改为“输入格式：SDLXLIFF；路径可能是单文件或目录；初始化使用 <code>--input-format sdlxliff</code>；报告 <code>source_manifest.json</code> 和 <code>tm_candidates.json</code>”。</p>
+<p>输入为 XML 时，把原文列、译文列改为“输入格式：SDLXLIFF 1.2（<code>--input-format sdlxliff</code>）或 XLIFF 2.0（<code>--input-format xliff</code>）；路径可能是单文件或目录；报告 <code>source_manifest.json</code>，SDLXLIFF 另报告 <code>tm_candidates.json</code>；交付 corrected XLSX 配套表和 corrected XML”。</p>
 <p>需要自动迭代时，单独增加：“本任务明确启用自动迭代，直到达到项目阈值或出现需要人工决定的问题。”</p>
 
 <h2>四、产出物</h2>
@@ -139,16 +142,26 @@ python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" \
 <table>
 <tr><th width="220">文件</th><th>用途</th></tr>
 <tr><td><code>scope.json</code></td><td>记录术语是否启用及当前必需模块；内容与 <code>state.check_scope</code> 一致</td></tr>
-<tr><td><code>source_manifest.json</code></td><td>SDLXLIFF 来源清单：文件 SHA-256、语言、扩展 namespace、规则命中、排除和保护证据</td></tr>
-<tr><td><code>tm_candidates.json</code></td><td>SDLXLIFF 严格 TM 候选；默认不等于已保护段</td></tr>
+<tr><td><code>source_manifest.json</code></td><td>XML 来源清单：文件 SHA-256、语言、扩展 namespace、规则命中、排除和保护证据</td></tr>
+<tr><td><code>tm_candidates.json</code></td><td>SDLXLIFF 严格 TM 候选；默认不等于已保护段；普通 XLIFF 2.0 不产生 SDL TM 候选</td></tr>
 <tr><td><code>*_lqe.xlsx</code></td><td>分数、逐段问题、建议译文、处理方式和历史记录，供 PM 与审校检查</td></tr>
 <tr><td><code>*_corrected.csv/tsv/xlsx</code></td><td>扩展名和内容结构由输入格式决定</td></tr>
+<tr><td><code>*_corrected.sdlxliff/xliff/xlf</code> 或 <code>*_corrected_xliff/</code></td><td>XML 单文件或目录任务的 corrected XML；原始 XML 不覆盖</td></tr>
 </table>
 <p>报告中的处理方式只使用“建议修改、需要人工确认、保持原译、已保护”。原输入文件不会被覆盖。</p>
 <p>LQE 报告使用富文本显示修改差异：原译中删除或替换的内容显示为红色删除线，建议译文中新增或替换的内容显示为红色字体。corrected 文件不添加差异样式。</p>
-<p>CSV/TSV：输出 *_corrected.csv/tsv，保持原行列和输入扩展名；XLSX：输出 *_corrected.xlsx，保持工作簿、工作表、空行、列顺序和格式；SDLXLIFF：输出新建固定 5 列的 *_corrected.xlsx。</p>
-<p>LQE Results 每个错误一行，同一 LQE Segment ID 连续；AI 复核、AI 编辑和检查来源列区分直接复核、重复段复用、机器预检保留与旧流程未知。“已生成并验证建议”表示已纳入建议译文，不表示已写回 state；“AI 模块记录”是本地内容绑定证据，不是外部身份签名。SDLXLIFF 报告固定为 16 列：来源文件、TU ID、SDL Segment ID、原文、原译、建议译文、处理方式、LQE Segment ID、LQE 错误序号、LQE AI 复核状态、LQE AI 编辑状态、LQE 检查来源、错误详情、Protected、Protection Evidence、LQE_Iter；表格与 SDLXLIFF 报告都把 LQE_Iter 放在最后一列。SDL corrected Excel 固定为 5 列：来源文件、TU ID、SDL Segment ID、原文、译文。</p>
-<p>第一版不回写 SDLXLIFF XML；导出只新增 corrected Excel，原始 XML 保持不变。</p>
+<p>CSV/TSV：输出 *_corrected.csv/tsv，保持原行列和输入扩展名；XLSX：输出 *_corrected.xlsx，保持工作簿、工作表、空行、列顺序和格式；XML：输出固定 5 列的 *_corrected.xlsx 配套表，并写出 corrected XML。</p>
+<p>LQE Results 每个错误一行，同一 LQE Segment ID 连续；AI 复核、AI 编辑和检查来源区分直接复核、重复段复用、机器预检保留与旧流程未知。“已生成并验证建议”表示已纳入建议译文，不表示已写回 state；“AI 模块记录”是本地内容绑定证据，不是外部身份签名。表格与 XML 使用相同的 10 列可见审校视图，来源文件、TU/Unit ID、Segment ID、处理方式、逐错误 provenance、保护证据和 <code>LQE_Iter</code> 保留在隐藏审计区；XML corrected Excel 配套表固定为 5 列：来源文件、TU/Unit ID、Segment ID、原文、译文。</p>
+<p>XML 以事务方式导出：单文件生成同扩展名的 <code>*_corrected.sdlxliff/xliff/xlf</code>，目录生成保留相对路径的 <code>*_corrected_xliff/</code>。原始 XML 始终不变；源文件漂移、corrected 混合内容无效或发布失败时不留下正式 corrected 产物。</p>
+
+<h3>可选：发布已定稿语料</h3>
+<div class="callout"><b>外部写操作：</b>只有用户明确授权后，才可把带 <code>.finalized</code> 且无待复核项的当前任务发布到 AIPE/语料服务。新端点必须先 dry-run；令牌只从环境变量读取，不能写进 URL、命令记录或回执。</div>
+<p class="prompt">python3 "$SCRIPTS/lqe_io.py" ingest-corpus --state "$JOB/state.json" \
+  --aipe-url "https://&lt;服务地址&gt;/corpus/ingest" \
+  --dry-run --payload-out "$JOB/corpus_ingest_request.json"
+python3 "$SCRIPTS/lqe_io.py" ingest-corpus --state "$JOB/state.json" \
+  --aipe-url "https://&lt;服务地址&gt;/corpus/ingest" --auth-env AIPE_API_TOKEN \
+  --batch-size 500 --concurrency 4 --timeout 30 --retries 2</p>
 
 <h2 id="acceptance">五、验收检查</h2>
 <table>
@@ -157,7 +170,7 @@ python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" \
 <tr><th>模块覆盖</th><td>当前模式的四个必需模块覆盖全部分配 id；结构校验无缺失、重复或非法字段</td></tr>
 <tr><th>保护规则</th><td>受保护段的问题数和改动数均为 0，导出文本与原译一致</td></tr>
 <tr><th>修改安全</th><td>变量、标签、换行和受保护文本没有变化；需要人工确认的项没有自动写入</td></tr>
-<tr><th>交付文件</th><td><code>*_lqe.xlsx</code> 与对应 corrected 文件均存在且可打开；CSV/TSV：输出 *_corrected.csv/tsv，保持原行列和输入扩展名；XLSX：输出 *_corrected.xlsx，保持工作簿、工作表、空行、列顺序和格式；SDLXLIFF：输出新建固定 5 列的 *_corrected.xlsx</td></tr>
+<tr><th>交付文件</th><td><code>*_lqe.xlsx</code> 与对应 corrected 文件均存在且可打开；CSV/TSV 保持原行列与扩展名；XLSX 保持工作簿、工作表、空行、列顺序和格式；XML 同时存在 5 列 XLSX 配套表和 corrected XML，且原始 XML 哈希不变</td></tr>
 <tr><th>结果说明</th><td>首轮数据与重试数据分开报告；未达到阈值时不描述为通过</td></tr>
 </table>
 
@@ -171,13 +184,17 @@ python3 "$SCRIPTS/lqe_chunk.py" split --state "$JOB/state.json" \
 <p>保留原译，在报告中标记“需要人工确认”。不要把多个合理方案中的任一个直接写入建议稿。</p>
 <b>运行中断？</b>
 <p>保留 <code>jobs/&lt;任务名&gt;/</code>。分块超过 30 段时可从 <code>*.ckpt.jsonl</code> 断点继续，完成后再生成正式模块 JSON。</p>
-<b>SDLXLIFF 初始化失败？</b>
-<p>先看报错中的文件、TU 和 namespace。XLIFF 2.0、混合语言批次或影响句段结构的未知扩展不会被猜测性跳过；修正输入或补充明确 profile 规则后建立新任务。</p>
+<b>SDLXLIFF/XLIFF 初始化失败？</b>
+<p>先看报错中的文件、TU/Unit、Segment 和 namespace。混合 XML 版本、混合语言批次或影响句段结构的未知扩展不会被猜测性跳过；拆分输入或补充明确 profile 规则后建立新任务。</p>
+<b>XML 导出失败？</b>
+<p>不要覆盖或手改原始 XML。先检查源文件是否在初始化后变化、建议译文中的标签是否可解析，再重新运行 export；事务失败不会把半成品当作正式交付。</p>
+<b>语料发布失败？</b>
+<p>保留错误和回执，不修改回执伪装成功。确认任务已 finalized、无待复核项、端点响应满足版本合同；相同已完成请求可安全重试，不同请求遇到现有回执会失败关闭。</p>
 <b>客户确认了新规则？</b>
 <p>把明确结论写入当前语言轨的 <code>confirmed_rules.md</code>，下次检查前读取；不要把项目规则写进目标语言通用事实。</p>
 </div>
 
-<footer>Langlobal · LQE Translator · 2026-07</footer>
+<footer>Langlobal · LQE Translator · 2026-08</footer>
 </div>
 </body>
 </html>

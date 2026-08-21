@@ -12,11 +12,11 @@ SCRIPTS="$SKILL/scripts"
 JOB="jobs/<job>"
 ```
 
-Use the Python interpreter from the active Codex environment. Install runtime
+Use Python 3.12 or newer from the active Codex environment. Install runtime
 dependencies only when missing:
 
 ```bash
-python3 -m pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx
+python3 -m pip install -r requirements.txt
 ```
 
 ## Standard end-to-end workflow
@@ -45,6 +45,20 @@ python3 "$SCRIPTS/lqe_io.py" read \
   --review-mode '<optimized|full>' \
   --out "$JOB/state.json"
 ```
+
+XLIFF 2.0 input (`.xliff` or `.xlf`):
+
+```bash
+python3 "$SCRIPTS/lqe_io.py" read \
+  --project '<game>/<source>-<target>' \
+  --input '<file-or-directory>' \
+  --input-format xliff \
+  --review-mode '<optimized|full>' \
+  --out "$JOB/state.json"
+```
+
+When XLIFF 2.0 omits root `trgLang`, the project profile or `--target-lang`
+must supply the target language. Conflicting declarations fail closed.
 
 Useful read switches include `--sheet`, `--key-col`, repeatable `--context-col`,
 `--no-header`, `--group-col`, `--style-guide`, `--source-lang`, `--target-lang`,
@@ -237,11 +251,13 @@ python3 "$SCRIPTS/lqe_context_overrides.py" scaffold \
   --source-id '<source-id>' --issuer '<issuer>'
 ```
 
-Validate profile assets and overlays:
+Validate a project profile or canonical asset, then validate overlays:
 
 ```bash
-python3 "$SCRIPTS/lqe_profile_ingest.py" validate '<profile-or-asset>' \
-  --schema '<schema.json>' --target-lang '<lang>'
+python3 "$SCRIPTS/lqe_profile_ingest.py" validate '<profile.json>' \
+  --target-lang '<lang>'
+python3 "$SCRIPTS/lqe_profile_ingest.py" validate '<canonical-asset.json>' \
+  --schema '<canonical-schema-name>' --target-lang '<lang>'
 python3 "$SCRIPTS/lqe_profile_ingest.py" validate-overrides \
   --input '<overrides.json>' --segments '<segments.json>' \
   --declared-extensions '<extensions.json>' --source-ids '<ids.json>'
@@ -284,8 +300,24 @@ Scoring switches shared by `lqe_calc.py`, `apply-fixes`, and `write` include
 `--repeat-dedup` / `--no-repeat-dedup`. Protection can use `--protected-ids` or
 `--protected-file`.
 
-`lqe_io.py ingest-corpus --state '<state>' --aipe-url '<url>'` is a reserved stub;
-it currently skips ingestion and must not be represented as a production path.
+XML export keeps the five-column corrected XLSX companion and also writes corrected
+XML. A single file produces `<job>_corrected.<sdlxliff|xliff|xlf>`; a directory
+produces `<job>_corrected_xliff/` with the original relative paths. Source XML is
+never modified.
+
+Publish a finalized job to a corpus only after explicit external-mutation
+authorization. Use `--dry-run` first when the endpoint contract is new:
+
+```bash
+python3 "$SCRIPTS/lqe_io.py" ingest-corpus \
+  --state "$JOB/state.json" --aipe-url '<https-url>' \
+  --auth-env '<token-env-name>' --batch-size 500 --concurrency 4 \
+  --timeout 30 --retries 2
+```
+
+Optional switches are `--changed-only`, `--dry-run`, `--payload-out`, and
+`--receipt`. The versioned request/response contract and fail-closed rules are in
+[`corpus_ingest.md`](corpus_ingest.md).
 
 ## Chunk recovery and checkpoint commands
 

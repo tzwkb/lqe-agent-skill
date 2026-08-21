@@ -2,13 +2,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Agent Skill](https://img.shields.io/badge/Agent%20Skill-Codex-blue.svg)](SKILL.md)
-[![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 
 English | [中文](README_ZH.md)
 
-Agent skill for game-localization LQE: deterministic pre-checks, focused AI check modules, validated local edits, scoring, and Excel deliverables.
+Agent skill for game-localization LQE: deterministic pre-checks, focused AI check modules, validated local edits, scoring, and format-specific deliverables.
 
-> The PM guide is maintained outside the runtime Skill in the Langlobal development docs.
+> Manual and agent operation, acceptance, and recovery are documented in the [PM guide](PM_GUIDE.html).
 
 ## What the workflow guarantees
 
@@ -17,8 +17,8 @@ Agent skill for game-localization LQE: deterministic pre-checks, focused AI chec
 - Models report `issues` and safe local `edit` operations. Python validates edits and builds the internal full-text result.
 - `confirmed: true` authorizes a unique terminology edit; `protected: true` means the content must not be changed.
 - Protected segments are neither changed nor scored.
-- SDLXLIFF 1.2 can be read from one file or a recursively scanned directory without an intermediate workbook.
-- Standard deliverables are `<job>_lqe.xlsx` plus a format-specific corrected file: CSV/TSV keeps the source extension; XLSX and SDLXLIFF use `.xlsx`.
+- SDLXLIFF 1.2 and XLIFF 2.0 can be read from one file or a recursively scanned directory without an intermediate workbook.
+- Standard deliverables are `<job>_lqe.xlsx` plus a format-specific corrected file. XML jobs keep the XLSX companion and additionally write corrected SDLXLIFF/XLIFF XML.
 
 ## Directory structure
 
@@ -33,8 +33,10 @@ lqe-translator/
 │   ├── lqe_calc.py         # Calculate the LQE score
 │   └── finalize_job.sh     # Validate through export in one command
 ├── references/
-│   ├── suggestions.md
-│   └── check_modules/
+│   ├── suggestions_v2.md
+│   ├── suggestion_review_v2.md
+│   ├── corpus_ingest.md
+│   └── check_modules_v2/
 │       ├── common.md
 │       ├── terminology.md
 │       ├── precheck_review.md
@@ -56,7 +58,7 @@ lqe-translator/
     ├── state.json
     ├── scope.json
     ├── tabular_source_manifest.json # Tabular jobs
-    ├── source_manifest.json         # SDLXLIFF jobs
+    ├── source_manifest.json         # XML jobs
     ├── tm_candidates.json         # SDLXLIFF jobs
     ├── capability_resolution.json
     ├── project_asset_snapshot.json
@@ -75,13 +77,16 @@ lqe-translator/
     ├── suggestion_review.json
     ├── reference_suggestions.json
     ├── <job>_lqe.xlsx
-    └── <job>_corrected.<csv|tsv|xlsx>
+    ├── <job>_corrected.<csv|tsv|xlsx>
+    └── <job>_corrected.<sdlxliff|xliff|xlf> or <job>_corrected_xliff/
 ```
 
 ## Setup
 
+Python 3.12 or newer is required.
+
 ```bash
-pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q
+python3 -m pip install -r requirements.txt
 SCRIPTS=~/.codex/skills/lqe-translator/scripts
 ```
 
@@ -141,7 +146,7 @@ python3 "$SCRIPTS/lqe_io.py" read \
 
 The resolved mode is stored in `state.check_scope` and copied to `$JOB/scope.json`. No-terminology mode disables terminology, proper-name, and term-audit work; it does not disable file-wide consistency, Markup, or numeric checks.
 
-For SDLXLIFF, pass one `.sdlxliff` file or a directory. `--input-format` accepts `auto`, `tabular`, or `sdlxliff`; a single file and a directory containing only SDLXLIFF files are auto-detected, while a mixed directory requires the explicit format. SDLXLIFF input reads source and target segments directly, so it does not use `--source-col` or `--target-col`:
+For XML localization input, pass one `.sdlxliff`, `.xliff`, or `.xlf` file, or a directory containing one supported XML family. `--input-format` accepts `auto`, `tabular`, `sdlxliff`, or `xliff`; supported single files and pure XML directories are auto-detected, while a mixed directory requires the explicit format. XML input reads source and target segments directly, so it does not use `--source-col` or `--target-col`:
 
 ```bash
 python3 "$SCRIPTS/lqe_io.py" read \
@@ -151,7 +156,7 @@ python3 "$SCRIPTS/lqe_io.py" read \
   --out "$JOB/state.json"
 ```
 
-The first release supports XLIFF 1.2 with the SDL namespace. XLIFF 2.0 is rejected. Unknown vendor extensions are preserved and recorded when segment boundaries remain unambiguous; an extension that makes source, target, or `mid` pairing ambiguous causes the import to fail. Content type and exclusion behavior comes only from explicit profile rules, never from CC, FF, filenames, or directory names.
+The runtime supports SDLXLIFF 1.2 and XLIFF 2.0. When XLIFF 2.0 omits root `trgLang`, the project profile or `--target-lang` must provide the target language explicitly; conflicting declarations fail closed. Unknown vendor extensions are preserved and recorded when segment boundaries remain unambiguous; an extension that makes source, target, or `mid` pairing ambiguous causes the import to fail. Content type and exclusion behavior comes only from explicit profile rules, never from CC, FF, filenames, or directory names.
 
 The following visible contract defines both resolved scopes:
 
@@ -319,7 +324,7 @@ Every Terminology issue must also carry `term_source`, `expected_targets`, and `
 
 `term_spans` has exactly the `source` and `target` arrays. Each span object has exactly integer `start`, integer `end`, and non-empty `text`, using a non-empty zero-based, half-open range. Arrays are sorted by `(start,end,text)` and contain no duplicates or overlaps. `text` must exactly equal the corresponding source or current-target slice, and every source-span `text` must equal `term_source`. `source` is non-empty. `target` may be empty when no affected target token can be located safely, including omissions; do not guess or mark the whole sentence. When reviewing a machine-generated Terminology issue, inherit read-only `term_source`, `expected_targets`, and `term_spans.source` through `precheck_ref`, then locate the affected current-target token in `term_spans.target`; leave that array empty only when no token can be marked safely. Newly found Terminology issues must supply all three fields.
 
-The tabular columns `content_type`, `text_type`, `文本类型`, and `文本类别` are passed into review packets as upstream text classifications and are never inferred. `optimized` mode uses row-level `content_type`, then `text_type_context`, to apply the matrix in `references/check_modules/common.md`; `full` keeps the classification as context without changing review intensity. Neither mode disables deterministic checks or required modules. Source text is never skipped because it resembles a section label; only marker rows explicitly declared in profile `tabular.text_type_marker_rules` are consumed and audited.
+The tabular columns `content_type`, `text_type`, `文本类型`, and `文本类别` are passed into review packets as upstream text classifications and are never inferred. `optimized` mode uses row-level `content_type`, then `text_type_context`, to apply the matrix in `references/check_modules_v2/common.md`; `full` keeps the classification as context without changing review intensity. Neither mode disables deterministic checks or required modules. Source text is never skipped because it resembles a section label; only marker rows explicitly declared in profile `tabular.text_type_marker_rules` are consumed and audited.
 
 New jobs also bind stable segment identity, source provenance, and a project asset/capability snapshot. Use `--sheet`, `--key-col`, and repeatable `--context-col FIELD=COLUMN` when the input carries explicit context; aliases include `--content-type-col`, `--speaker-col`, and `--addressee-col`. Optional profile capabilities affect formal packets only in `enforce` mode; `shadow` writes `shadow_context/context.json` and never feeds formal deduplication, review, suggestions, or reports. Legacy `.xls` is read with `xlrd>=2.0` and corrected output is always `.xlsx`.
 
@@ -398,7 +403,7 @@ Every input produces `<job>_lqe.xlsx` with the score, issues, suggested text, re
 
 - CSV/TSV inputs produce `<job>_corrected.csv` or `<job>_corrected.tsv` and preserve rows, columns, and the source extension.
 - XLSX input produces `<job>_corrected.xlsx` and preserves the workbook, worksheets, blank rows, column order, and formatting.
-- SDLXLIFF produces a new fixed five-column `<job>_corrected.xlsx`.
+- SDLXLIFF/XLIFF produces a fixed five-column `<job>_corrected.xlsx` companion plus corrected XML: `<job>_corrected.<sdlxliff|xliff|xlf>` for one file or `<job>_corrected_xliff/` for a directory.
 
 Reports have three visible worksheets: `说明·导读`, `LQA Scorecard`, and `LQE Results`; `_LQE_CONTRACT` remains very hidden. The guide is first and is the default opening sheet, with a three-step reading flow, Scorecard guidance, definitions for all ten review columns, status and decision guidance, and a delivery checklist. The Scorecard shows the verdict, score, compact category summary, and all per-issue review rows without hidden rows or columns.
 
@@ -410,9 +415,13 @@ Rich-text reports show affected source terms in red. Affected original-target te
 
 In verified internal results, `corrected: ""` is a valid deletion of the whole target; only `corrected: null` means no suggested change. Write, apply, export, and aggregation preserve that distinction.
 
-Tabular and SDLXLIFF reports use the same ten-column reviewer view. Source file, TU ID, SDL Segment ID, processing, per-issue provenance, protection evidence, and `LQE_Iter` remain in the hidden audit area; `LQE_Iter` is always last. `source_manifest.json` stores input SHA-256 hashes, declared languages, extension namespaces, rule matches, exclusions, and locked/TM evidence. The new corrected workbook uses five columns: `来源文件`, `TU ID`, `SDL Segment ID`, `原文`, `译文`.
+Tabular and XML reports use the same ten-column reviewer view. Source file, TU/Unit ID, Segment ID, processing, per-issue provenance, protection evidence, and `LQE_Iter` remain in the hidden audit area; `LQE_Iter` is always last. `source_manifest.json` stores input SHA-256 hashes, declared languages, extension namespaces, rule matches, exclusions, and locked/TM evidence. The corrected workbook companion uses five columns: `来源文件`, `TU/Unit ID`, `Segment ID`, `原文`, `译文`.
 
-The first release does not write back to SDLXLIFF XML. `export` creates `<job>_corrected.xlsx` and leaves every source XML file unchanged.
+`export` writes corrected XML transactionally and leaves every source XML file unchanged. Malformed corrected mixed content, source drift, or publication failure produces no formal corrected output.
+
+### Finalized corpus publication
+
+`ingest-corpus` is an explicit external write for current-runtime jobs that have a `.finalized` marker. It publishes the versioned JSON contract in bounded asynchronous batches, uses an environment variable for optional bearer authentication, and writes an idempotent receipt. Inspect with `--dry-run --payload-out <path>` before enabling a new endpoint. See [`references/corpus_ingest.md`](references/corpus_ingest.md).
 
 ## Scoring
 

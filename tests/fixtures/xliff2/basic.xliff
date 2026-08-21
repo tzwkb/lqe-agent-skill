@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0"
+       xmlns:ext="https://example.com/xliff/ext"
+       version="2.0" srcLang="en" trgLang="fr">
+  <file id="f1" original="game/dialog.json">
+    <unit id="u1">
+      <notes><note>Greeting shown at login.</note></notes>
+      <segment id="s1" state="translated">
+        <source>Hello <ph id="1"/>!</source>
+        <target>Bonjour <ph id="1"/> !</target>
+        <ext:quality score="0.9"/>
+      </segment>
+    </unit>
+    <group id="g1" translate="no">
+      <unit id="u2">
+        <segment id="s2">
+          <source>Locked text</source>
+          <target>Texte verrouillé</target>
+        </segment>
+      </unit>
+    </group>
+    <unit id="u3">
+      <segment id="s3">
+        <source>Missing target</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>

@@ -1,6 +1,6 @@
 ---
 name: lqe-translator
-description: LQE scoring and review workflow for game-localization translations. Use for project-aware checks, safe corrections, scoring, reference suggestions, and Excel delivery.
+description: LQE scoring and review workflow for game-localization translations. Use for project-aware checks, safe corrections, scoring, reference suggestions, and tabular or XML delivery.
 ---
 
 # LQE Translator
@@ -9,7 +9,7 @@ Run the native scripts. Read only the references required by the current phase. 
 
 ## Required decisions and inputs
 
-Before a new job, confirm: input path, source/target columns or SDLXLIFF input, project/language pair, terminology source, and review mode. `optimized` is the cost-saving mode; `full` is complete review. If the request does not specify the mode, 必须先询问一次并等待回答；不得根据项目、文件、历史任务或成本偏好代选. Pass `--review-mode "<optimized|full>"`. Existing jobs keep `state.review_policy`.
+Before a new job, confirm: input path, source/target columns or SDLXLIFF/XLIFF input, project/language pair, terminology source, and review mode. `optimized` is the cost-saving mode; `full` is complete review. If the request does not specify the mode, 必须先询问一次并等待回答；不得根据项目、文件、历史任务或成本偏好代选. Pass `--review-mode "<optimized|full>"`. Existing jobs keep `state.review_policy`.
 
 <pre data-lqe-review-mode-contract>
 {
@@ -101,7 +101,7 @@ python3 "$SCRIPTS/lqe_io.py" read --project '<game>/<source>-<target>' \
   --review-mode '<optimized|full>' --out "$JOB/state.json"
 ```
 
-For SDLXLIFF 1.2 use `--input-format sdlxliff`; single files and pure directories are supported. XLIFF 2.0 fails. 未知厂商扩展 may be retained only when segment pairing remains unambiguous. `source_manifest.json` records the source and `tm_candidates.json` records strict TM candidates. `SOURCE_LOCKED` segments are protected. `--protect-exact-tm` is explicit opt-in. 第一版不回写 SDLXLIFF XML; export is XLSX.
+For SDLXLIFF 1.2 use `--input-format sdlxliff`; for XLIFF 2.0 use `--input-format xliff`. Single files and pure XML directories are supported. XLIFF 2.0 may omit `trgLang` only when the project profile or `--target-lang` supplies it explicitly. 未知厂商扩展 may be retained only when segment pairing remains unambiguous. `source_manifest.json` records the source and `tm_candidates.json` records strict SDL TM candidates. `SOURCE_LOCKED` segments are protected. `--protect-exact-tm` is explicit SDL opt-in. Export keeps the five-column XLSX companion and writes corrected XML without modifying the source XML.
 
 Optional SDL profile keys are `"sdlxliff"`, `"tm_protection"`, `"content_type_rules"`, and `"exclude_rules"`; policies include `candidate-only` and `protect-exact-source-and-target`.
 
@@ -172,7 +172,7 @@ Guard v2 enforces `suggestion_candidate_rules`, confirmed-term 精确出现次�
 bash "$SCRIPTS/finalize_job.sh" "$JOB" <chunk_count> single
 ```
 
-Deliverables are `<job>_lqe.xlsx` and `<job>_corrected.<csv|tsv|xlsx>`. SDL reports include: Segment ID、原文、原译、AI/建议译文、建议状态、错误类别、严重度、问题说明、审校结论、审校终稿或备注. SDL corrected export includes: 来源文件、TU ID、SDL Segment ID、原文、译文. In the report, 原译中删除或替换的内容显示为红色删除线 and AI/建议译文中新增或替换的内容显示为红色字体; corrected 文件不添加差异样式.
+Deliverables are `<job>_lqe.xlsx` and `<job>_corrected.<csv|tsv|xlsx>`. XML jobs additionally produce `<job>_corrected.<sdlxliff|xliff|xlf>` for a single file or `<job>_corrected_xliff/` for a directory. XML reports include: Segment ID、原文、原译、AI/建议译文、建议状态、错误类别、严重度、问题说明、审校结论、审校终稿或备注. The XLSX companion includes: 来源文件、TU/Unit ID、Segment ID、原文、译文. In the report, 原译中删除或替换的内容显示为红色删除线 and AI/建议译文中新增或替换的内容显示为红色字体; corrected 文件不添加差异样式.
 
 ## Multi-sheet default
 
@@ -197,10 +197,11 @@ Do not aggregate by default: 不运行聚合脚本. 只有用户明确要求跨�
 - Checker contract: [`references/check_modules_v2/common.md`](references/check_modules_v2/common.md), then only the selected v2 module. Unsuffixed checker files remain immutable for legacy jobs.
 - Suggestion generation/review: [`references/suggestions_v2.md`](references/suggestions_v2.md) and [`references/suggestion_review_v2.md`](references/suggestion_review_v2.md) for new jobs. The unsuffixed files are immutable legacy runtime references.
 - Feedback analysis and learning: [`references/feedback_learning.md`](references/feedback_learning.md).
+- Finalized corpus publication: [`references/corpus_ingest.md`](references/corpus_ingest.md). Run it only after an explicit request to mutate the external corpus.
 - Project profiles and assets: [`projects/README.md`](projects/README.md), then `projects/<game>/<pair>/profile.json`, `confirmed_rules.md`, style guide, and terminology.
 - Target-language rules: [`target_languages/README.md`](target_languages/README.md), then only the selected language note.
 
-Install: `pip install "openpyxl>=3.1" "xlrd>=2.0" "jsonschema>=4.20" regex requests python-docx -q`.
+Requires Python 3.12 or newer. Install: `python3 -m pip install -r requirements.txt`.
 
 ```bash
 python3 scripts/run_tests.py

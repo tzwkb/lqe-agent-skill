@@ -460,7 +460,8 @@ class DocumentedContractTests(unittest.TestCase):
             "tm_candidates.json",
             "SOURCE_LOCKED",
             "XLIFF 2.0",
-            "第一版不回写 SDLXLIFF XML",
+            "--input-format xliff",
+            "corrected XML",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, skill)
@@ -483,7 +484,7 @@ class DocumentedContractTests(unittest.TestCase):
             "Segment ID、原文、原译、AI/建议译文、建议状态、错误类别、"
             "严重度、问题说明、审校结论、审校终稿或备注"
         )
-        expected_export = "来源文件、TU ID、SDL Segment ID、原文、译文"
+        expected_export = "来源文件、TU/Unit ID、Segment ID、原文、译文"
         for path in USER_DOCUMENTS:
             with self.subTest(path=path):
                 content = (ROOT / path).read_text(encoding="utf-8")
@@ -495,11 +496,16 @@ class DocumentedContractTests(unittest.TestCase):
             "原译中删除或替换的内容显示为红色删除线",
             "AI/建议译文中新增或替换的内容显示为红色字体",
             "corrected 文件不添加差异样式",
-            "openpyxl>=3.1",
-            '"jsonschema>=4.20" regex',
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.skill)
+
+    def test_skill_uses_the_versioned_dependency_manifest(self):
+        self.assertIn("requirements.txt", self.skill)
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        for dependency in ("openpyxl>=3.1", "jsonschema>=4.20", "httpx>=0.28"):
+            with self.subTest(dependency=dependency):
+                self.assertIn(dependency, requirements)
 
 
 if __name__ == "__main__":
