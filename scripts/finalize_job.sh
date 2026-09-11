@@ -107,6 +107,14 @@ PY
   return 0
 }
 
+verify_native_report() {
+  if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" verify-output \
+       --state "$JOB/state.json" --errors "$JOB/errors.json"; then
+    echo "VERIFY-OUTPUT FAIL $1; not delivering" >&2
+    return 1
+  fi
+}
+
 run_suggestion_candidate_finalization() {
   finalize_suggestion_candidates
   SUGGESTION_RESULT=$?
@@ -151,6 +159,7 @@ if [ "$STATUS" = "PASS" ]; then
   if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" write --state "$JOB/state.json" --errors "$JOB/errors.json" --score "$SCORE"; then
     echo "WRITE FAIL $1; not finalizing"; exit 6
   fi
+  if ! verify_native_report "$1"; then exit 6; fi
   if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" export --state "$JOB/state.json" --errors "$JOB/errors.json"; then
     echo "EXPORT FAIL $1; not finalizing"; exit 7
   fi
@@ -165,6 +174,7 @@ elif [ "$MODE" = "single" ]; then
   if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" write --state "$JOB/state.json" --errors "$JOB/errors.json" --score "$SCORE"; then
     echo "WRITE FAIL $1; not finalizing"; exit 6
   fi
+  if ! verify_native_report "$1"; then exit 6; fi
   if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" export --state "$JOB/state.json" --errors "$JOB/errors.json"; then
     echo "EXPORT FAIL $1; not finalizing"; exit 7
   fi
@@ -195,6 +205,7 @@ else
     if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" write --state "$JOB/state.json" --errors "$JOB/errors.json" --score "$SCORE"; then
       echo "WRITE FAIL $1; not finalizing"; exit 6
     fi
+    if ! verify_native_report "$1"; then exit 6; fi
     if ! ${PYTHON:-python3} "$SK/scripts/lqe_io.py" export --state "$JOB/state.json" --errors "$JOB/errors.json"; then
       echo "EXPORT FAIL $1; not finalizing"; exit 7
     fi

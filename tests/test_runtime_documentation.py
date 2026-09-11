@@ -24,7 +24,7 @@ class RuntimeDocumentationTests(unittest.TestCase):
         expected = {
             "lqe_io.py": {
                 "read", "reread", "apply-fixes", "protect-segments",
-                "build-results", "write", "pre-check", "lookup-terms",
+                "build-results", "write", "verify-output", "pre-check", "lookup-terms",
                 "export", "ingest-corpus",
             },
             "lqe_chunk.py": {

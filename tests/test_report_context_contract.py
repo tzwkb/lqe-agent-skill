@@ -17,6 +17,12 @@ from lqe_report_contract import (
     attach_report_contract,
     context_audit_values,
     validate_report_contract,
+    verify_native_report,
+)
+from lqe_delivery import (
+    begin_report_attempt,
+    complete_report_attempt,
+    validate_report_receipt,
 )
 from lqe_io import _build_xlsx
 
@@ -38,7 +44,74 @@ def workbook_with_results(*, context_headers: bool) -> openpyxl.Workbook:
 
 
 class ReportContextContractTests(unittest.TestCase):
-    def test_current_runtime_requires_context_audit_columns_and_writes_v6(self):
+    def test_native_output_provenance_is_required_and_bound_to_job(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = {
+                "artifact_contract_version": 1,
+                "job_runtime_contract_version": 2,
+                "context_contract_version": 1,
+                "job_id": "job-a",
+                "created_at": "2026-09-11T00:00:00Z",
+                "scoring_policy": {"scorecard_profile": "lqe_2026"},
+                "segments": [],
+            }
+            results = []
+            output = root / "job-a_lqe.xlsx"
+            workbook = workbook_with_results(context_headers=True)
+            attach_report_contract(workbook, state, results)
+            workbook.save(output)
+            workbook.close()
+
+            verified = verify_native_report(output, state, results)
+            self.assertEqual(verified["job_id"], "job-a")
+            self.assertEqual(verified["writer"], "lqe_io._build_xlsx")
+
+            foreign_state = dict(state, job_id="job-b")
+            with self.assertRaisesRegex(ValueError, "stale|provenance"):
+                verify_native_report(output, foreign_state, results)
+
+    def test_report_without_contract_is_not_native_delivery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "copied.xlsx"
+            workbook = openpyxl.Workbook()
+            workbook.save(output)
+            workbook.close()
+            state = {
+                "job_runtime_contract_version": 2,
+                "job_id": "job-a",
+                "segments": [],
+            }
+            with self.assertRaisesRegex(ValueError, "missing _LQE_CONTRACT"):
+                verify_native_report(output, state, [])
+
+    def test_delivery_receipt_invalidates_previous_report_attempt(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = {
+                "artifact_contract_version": 1,
+                "job_runtime_contract_version": 2,
+                "context_contract_version": 1,
+                "job_id": "job-a",
+                "created_at": "2026-09-11T00:00:00Z",
+                "segments": [],
+            }
+            results = []
+            output = root / "job-a_lqe.xlsx"
+            workbook = workbook_with_results(context_headers=True)
+            attach_report_contract(workbook, state, results)
+            workbook.save(output)
+            workbook.close()
+
+            generation = begin_report_attempt(root, state)
+            complete_report_attempt(root, state, results, output, generation)
+            validate_report_receipt(root, state, results, output)
+
+            begin_report_attempt(root, state)
+            with self.assertRaisesRegex(ValueError, "not complete"):
+                validate_report_receipt(root, state, results, output)
+
+    def test_current_runtime_requires_context_audit_columns_and_writes_v7(self):
         state = {
             "artifact_contract_version": 1,
             "job_runtime_contract_version": 2,
@@ -52,7 +125,7 @@ class ReportContextContractTests(unittest.TestCase):
         workbook = workbook_with_results(context_headers=True)
         attach_report_contract(workbook, state, [])
         contract = json.loads(workbook[SHEET_NAME]["A1"].value)
-        self.assertEqual(contract["version"], 6)
+        self.assertEqual(contract["version"], 7)
         self.assertEqual(contract["job_runtime_contract_version"], 2)
         self.assertEqual(
             contract["context_audit_headers"], list(CONTEXT_AUDIT_HEADERS)
@@ -105,7 +178,7 @@ class ReportContextContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rows do not match"):
             attach_report_contract(workbook, state, results)
 
-    def test_generated_v6_report_exposes_context_coverage_and_input_warning(self):
+    def test_generated_v7_report_exposes_context_coverage_and_input_warning(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "report.xlsx"
             segments = [

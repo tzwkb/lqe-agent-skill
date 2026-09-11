@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 import json
+from pathlib import Path
 
+from openpyxl import load_workbook
 from openpyxl.cell.rich_text import CellRichText
 
 from lqe_engine import requires_bound_artifacts
@@ -14,8 +16,11 @@ from lqe_split_contract import canonical_digest
 
 SHEET_NAME = "_LQE_CONTRACT"
 SCHEMA = "lqe.report-contract"
-VERSION = 6
+VERSION = 7
 LEGACY_VERSION = 5
+NATIVE_WRITER = "lqe_io._build_xlsx"
+NATIVE_OUTPUT_MODE = "native_internal_writer"
+REFERENCE_TEMPLATE_MODE = "reference_only"
 
 CONTEXT_AUDIT_HEADERS = (
     "Segment Key",
@@ -260,6 +265,19 @@ def build_report_contract(workbook, state: dict, results: list[dict]) -> dict:
             if "LQA Scorecard" in workbook.sheetnames
             else None
         ),
+        "delivery": {
+            "writer": NATIVE_WRITER,
+            "output_mode": NATIVE_OUTPUT_MODE,
+            "reference_template_mode": REFERENCE_TEMPLATE_MODE,
+            "reference_template_applied": False,
+            "job_id": state.get("job_id") or "unbound",
+            "job_created_at": state.get("created_at"),
+            "scorecard_profile": (
+                state.get("scoring_policy", {}).get("scorecard_profile")
+                if isinstance(state.get("scoring_policy"), dict)
+                else None
+            ),
+        },
     }
     if current_runtime:
         payload.update({
@@ -306,3 +324,58 @@ def validate_report_contract(workbook, state: dict, results: list[dict]) -> None
             "child report is stale for current state/errors "
             f"(mismatch: {', '.join(fields)})"
         )
+
+
+def verify_native_report(output_path, state: dict, results: list[dict]) -> dict:
+    """Fail closed unless *output_path* is a current native LQE report.
+
+    This is deliberately stricter than ``validate_report_contract``: aggregation
+    and historical readers may accept a legacy contract, while final delivery
+    must prove that the native writer created the workbook.
+    """
+    output_path = Path(output_path)
+    if not output_path.is_file():
+        raise ValueError(f"native LQE report is missing: {output_path}")
+    if state.get("job_runtime_contract_version") != 2:
+        raise ValueError("native report verification requires runtime contract v2")
+    workbook = load_workbook(
+        str(output_path),
+        rich_text=True,
+        data_only=False,
+    )
+    try:
+        validate_report_contract(workbook, state, results)
+        raw = workbook[SHEET_NAME]["A1"].value
+        contract = json.loads(raw)
+        if contract.get("version") != VERSION:
+            raise ValueError(
+                f"native report contract version must be {VERSION}"
+            )
+        delivery = contract.get("delivery")
+        if not isinstance(delivery, dict):
+            raise ValueError("native report is missing delivery provenance")
+        expected = {
+            "writer": NATIVE_WRITER,
+            "output_mode": NATIVE_OUTPUT_MODE,
+            "reference_template_mode": REFERENCE_TEMPLATE_MODE,
+            "reference_template_applied": False,
+            "job_id": state.get("job_id") or "unbound",
+            "job_created_at": state.get("created_at"),
+            "scorecard_profile": (
+                state.get("scoring_policy", {}).get("scorecard_profile")
+                if isinstance(state.get("scoring_policy"), dict)
+                else None
+            ),
+        }
+        if delivery != expected:
+            raise ValueError(
+                "native report delivery provenance does not match current job"
+            )
+        return {
+            "report": str(output_path),
+            "contract_digest": contract["contract_digest"],
+            "writer": delivery["writer"],
+            "job_id": delivery["job_id"],
+        }
+    finally:
+        workbook.close()

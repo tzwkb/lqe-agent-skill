@@ -1016,6 +1016,13 @@ class RichDiffReportTests(unittest.TestCase):
             )
         finally:
             workbook.close()
+        lqe_io.cmd_verify_output(
+            SimpleNamespace(
+                state=str(state_path),
+                errors=str(errors_path),
+                report=None,
+            )
+        )
         self.assertFalse(list(job.glob(".*.tmp")))
         self.assertFalse(list(job.glob(".*.xlsx")))
 

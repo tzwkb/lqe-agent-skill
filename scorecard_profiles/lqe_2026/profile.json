@@ -82,6 +82,9 @@
   "report_template": {
     "type": "xlsx",
     "path": "template.xlsx",
+    "role": "reference_only",
+    "output_writer": "lqe_io._build_xlsx",
+    "applied_during_write": false,
     "score_sheet": "Scorecard",
     "detail_start_row": 37,
     "detail_end_row": 156,

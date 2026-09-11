@@ -165,6 +165,18 @@ bash "$SCRIPTS/finalize_job.sh" "$JOB" '<chunk-count>' single
 Use `iterate` only for a workflow that explicitly requires iterative finalization.
 Suggestion generation/review must never be looped merely to increase acceptance.
 
+The finalization script verifies each native report after `write`. To verify a
+report manually, use the same contract gate:
+
+```bash
+python3 "$SCRIPTS/lqe_io.py" verify-output \
+  --state "$JOB/state.json" \
+  --errors "$JOB/errors.json" \
+  --report "$JOB/<job>_lqe.xlsx"
+```
+
+This command rejects stale, unbound, non-native, or cross-job workbooks.
+
 ## Input, protection, and terminology commands
 
 Re-read a changed source into a new job while preserving compatible lineage:

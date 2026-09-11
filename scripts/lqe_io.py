@@ -25,6 +25,10 @@ from copy import copy, deepcopy
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from lqe_dependencies import require_runtime_dependencies
+
+require_runtime_dependencies()
+
 import openpyxl
 import regex
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -90,7 +94,16 @@ from lqe_scoring import (
     score_errors,
     scoring_policy_overrides,
 )
-from lqe_report_contract import attach_report_contract, context_audit_values
+from lqe_report_contract import (
+    attach_report_contract,
+    context_audit_values,
+    verify_native_report,
+)
+from lqe_delivery import (
+    begin_report_attempt,
+    complete_report_attempt,
+    validate_report_receipt,
+)
 from lqe_provenance import (
     AUDIT_HEADER_BASES,
     issue_detail,
@@ -1789,6 +1802,7 @@ def _prepare_read_assets(
 
     return {
         "job_runtime_contract_version": JOB_RUNTIME_CONTRACT_VERSION,
+        "job_id": _job_label(Path(args.out)),
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "context_contract_version": 1,
         "input_guard_version": 1,
@@ -5808,8 +5822,11 @@ def cmd_write(args):
     from lqe_chunk import verification_generation_lease
 
     state_path = Path(args.state)
+    errors_path = Path(args.errors)
+    initial_state = read_json(state_path)
+    generation_id = begin_report_attempt(state_path.parent, initial_state)
     try:
-        require_current_job_runtime(read_json(state_path), "write")
+        require_current_job_runtime(initial_state, "write")
         with verification_generation_lease(
             state_path,
             exclusive=True,
@@ -5822,8 +5839,41 @@ def cmd_write(args):
                 manifest,
                 revalidate,
             )
+        complete_report_attempt(
+            state_path.parent,
+            read_json(state_path),
+            read_json(errors_path),
+            state_path.parent / (_job_label(state_path) + "_lqe.xlsx"),
+            generation_id,
+        )
     except ValueError as exc:
         raise SystemExit(f"[write] {exc}") from exc
+
+
+def cmd_verify_output(args):
+    state_path = Path(args.state)
+    errors_path = Path(args.errors)
+    output_path = (
+        Path(args.report)
+        if getattr(args, "report", None)
+        else state_path.parent / (_job_label(state_path) + "_lqe.xlsx")
+    )
+    try:
+        state = read_json(state_path)
+        results = read_json(errors_path)
+        if not isinstance(results, list):
+            raise ValueError("errors payload must be an array")
+        result = verify_native_report(output_path, state, results)
+        receipt = validate_report_receipt(
+            state_path.parent,
+            state,
+            results,
+            output_path,
+        )
+        result["generation_id"] = receipt["generation_id"]
+    except (OSError, ValueError, KeyError) as exc:
+        raise SystemExit(f"[verify-output] {exc}") from exc
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
 # ── pre-check（实现在 lqe_checks.py）─────────────────────────────────────────
@@ -6717,6 +6767,11 @@ def main():
     w.add_argument("--score",     required=True)
     _add_scoring_policy_args(w)
 
+    vo = sub.add_parser("verify-output")
+    vo.add_argument("--state", required=True)
+    vo.add_argument("--errors", required=True)
+    vo.add_argument("--report", default=None, help="报告路径；默认使用当前任务的 *_lqe.xlsx")
+
     pc = sub.add_parser("pre-check")
     pc.add_argument("--state", required=True)
     pc.add_argument("--out", default=None, help="输出路径（默认 {job_dir}/errors_precheck.json）")
@@ -6751,6 +6806,7 @@ def main():
         "build-results":  cmd_build_results,
         "apply-fixes":    cmd_apply_fixes,
         "write":          cmd_write,
+        "verify-output":  cmd_verify_output,
         "export":         cmd_export,
         "lookup-terms":   cmd_lookup_terms,
         "ingest-corpus":  cmd_ingest_corpus,

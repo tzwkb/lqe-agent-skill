@@ -172,6 +172,29 @@ Guard v2 enforces `suggestion_candidate_rules`, confirmed-term 精确出现次�
 bash "$SCRIPTS/finalize_job.sh" "$JOB" <chunk_count> single
 ```
 
+`scorecard_profiles/lqe_2026/template.xlsx` is a reference workbook copied from
+the customer asset. It is marked `reference_only` and is not consumed by the
+current report writer. Native delivery is produced only by `lqe_io.py write`,
+using `lqe_io._build_xlsx`; it must contain `说明·导读`, `LQA Scorecard`,
+`LQE Results`, and the veryHidden `_LQE_CONTRACT` provenance page. Do not use a
+spreadsheet helper to recreate the report, do not rename or copy an earlier
+`.xlsx` into the current job, and do not call a copied workbook a template
+output.
+
+After every successful `write`, the job must pass the native output gate:
+
+```bash
+python3 "$SCRIPTS/lqe_io.py" verify-output \
+  --state "$JOB/state.json" \
+  --errors "$JOB/errors.json"
+```
+
+The gate rejects missing/stale reports, reports without `_LQE_CONTRACT`,
+reports made by another writer, and reports whose job provenance does not match
+the current state. A failed read, review, score, write, or output verification
+means there is no deliverable; preserve the error and stop instead of copying
+or relabeling a previous report. See [`references/output_delivery.md`](references/output_delivery.md).
+
 Deliverables are `<job>_lqe.xlsx` and `<job>_corrected.<csv|tsv|xlsx>`. XML jobs additionally produce `<job>_corrected.<sdlxliff|xliff|xlf>` for a single file or `<job>_corrected_xliff/` for a directory. XML reports include: Segment ID、原文、原译、AI/建议译文、建议状态、错误类别、严重度、问题说明、审校结论、审校终稿或备注. The XLSX companion includes: 来源文件、TU/Unit ID、Segment ID、原文、译文. In the report, 原译中删除或替换的内容显示为红色删除线 and AI/建议译文中新增或替换的内容显示为红色字体; corrected 文件不添加差异样式.
 
 ## Multi-sheet default

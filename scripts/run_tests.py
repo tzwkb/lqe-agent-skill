@@ -15,6 +15,11 @@ import tempfile
 import csv
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lqe_dependencies import require_runtime_dependencies
+
+require_runtime_dependencies()
+
 import openpyxl
 
 SCRIPTS = Path(__file__).resolve().parent
